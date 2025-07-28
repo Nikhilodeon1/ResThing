@@ -2,6 +2,7 @@
 import os
 import pandas as pd
 from PIL import Image
+import torch
 from torch.utils.data import Dataset, DataLoader
 from data.transforms import get_image_transforms # Assuming transforms.py is in the same 'data' directory
 
