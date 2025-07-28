@@ -6,103 +6,136 @@ from torch.utils.data import Dataset, DataLoader
 from data.transforms import get_image_transforms # Assuming transforms.py is in the same 'data' directory
 
 class CelebADataset(Dataset):
-    def __init__(self, root_dir, transform=None, concept_positive=None, concept_negative=None):
+    def __init__(self, root_dir, target_attribute, transform=None):
         """
         Args:
-            root_dir (string): Directory with all the images and annotation file.
-                               Expected structure: root_dir/img_align_celeba/ and root_dir/list_attr_celeba.csv
+            root_dir (str): Directory with all the CelebA image folders and attribute list.
+            target_attribute (str): The attribute to target (e.g., 'Smiling').
             transform (callable, optional): Optional transform to be applied on an image.
-            concept_positive (string): The attribute name for positive samples (e.g., "Smiling").
-            concept_negative (string): The attribute name for negative samples (e.g., "Not_Smiling").
         """
         self.root_dir = root_dir
-        self.img_dir = os.path.join(root_dir, 'img_align_celeba')
-        self.attr_path = os.path.join(root_dir, 'list_attr_celeba.csv')
         self.transform = transform
+        self.img_dir = os.path.join(root_dir, 'images') # Assuming images are in a subfolder 'images'
+        self.attr_file = os.path.join(root_dir, 'list_attr_celeba.csv')
 
-        if not os.path.exists(self.attr_path):
-            raise FileNotFoundError(f"Annotation file not found at: {self.attr_path}. Please check the path and extraction.")
-        
-        self.attr_df = pd.read_csv(self.attr_path, delim_whitespace=True) # Use delim_whitespace as per provided format [cite: 242]
+        # --- DIAGNOSTIC ADDITION START ---
+        print(f"DEBUG (CelebADataset): Attempting to load attribute file from: {self.attr_file}")
+        if not os.path.exists(self.attr_file):
+            raise FileNotFoundError(f"DEBUG (CelebADataset): Attribute file NOT FOUND at: {self.attr_file}. Please check your path.")
+        # --- DIAGNOSTIC ADDITION END ---
 
-        self.data_filtered = []
-        if concept_positive and concept_negative:
-            # Filter for images that are clearly positive or negative for the concept
-            # Assuming '1' for positive, '-1' for negative [cite: 243]
-            positive_attr = self.attr_df[self.attr_df[concept_positive] == 1]
-            negative_attr = self.attr_df[self.attr_df[concept_negative] == 1] # This might be incorrect based on sample data - let's refine.
+        self.attr_df = pd.read_csv(self.attr_file)
+        self.attr_df = self.attr_df.set_index('image_id') # Assuming 'image_id' is the column name for the index
 
-            # Re-evaluating based on sample data: attributes are binary, 1 for present, -1 for absent.
-            # So, for "Smiling" positive is 1, negative is -1.
-            self.data_filtered = self.attr_df[
-                (self.attr_df[concept_positive] == 1) | (self.attr_df[concept_positive] == -1)
-            ].copy()
-            self.data_filtered['label'] = (self.data_filtered[concept_positive] == 1).astype(int)
-        else:
-            print("Warning: No concepts provided for filtering. Loading all images.")
-            self.data_filtered = self.attr_df.copy()
-            self.data_filtered['label'] = 0 # Default label if not filtering
+        # --- DIAGNOSTIC ADDITION START ---
+        print(f"DEBUG (CelebADataset): Columns loaded into attr_df: {self.attr_df.columns.tolist()}")
+        # --- DIAGNOSTIC ADDITION END ---
 
-        if self.data_filtered.empty:
-            raise ValueError("No data found after filtering. Check concept names or dataset integrity.")
+        self.target_attribute = target_attribute
+
+        # This is the line (or very near it) that caused the KeyError
+        # Make sure the target_attribute is in the columns list *here*
+        if self.target_attribute not in self.attr_df.columns:
+            raise KeyError(f"DEBUG (CelebADataset): Configured target attribute '{self.target_attribute}' not found in loaded CSV columns. Available: {self.attr_df.columns.tolist()}")
+
+
+        # Filter for positive and negative samples based on the target attribute
+        # Assuming original labels are 1 and -1 as per CelebA standard
+        self.image_ids = self.attr_df.index.tolist()
+        self.labels = self.attr_df[self.target_attribute].loc[self.image_ids].values
 
     def __len__(self):
-        return len(self.data_filtered)
+        return len(self.image_ids)
 
     def __getitem__(self, idx):
-        img_name = os.path.join(self.img_dir, self.data_filtered.iloc[idx]['image_id'])
-        image = Image.open(img_name).convert('RGB')
-        label = self.data_filtered.iloc[idx]['label']
+        img_name = self.image_ids[idx]
+        img_path = os.path.join(self.img_dir, img_name)
+        image = Image.open(img_path).convert('RGB')
+        label = self.labels[idx]
 
         if self.transform:
             image = self.transform(image)
 
-        return image, label, self.data_filtered.iloc[idx]['image_id'] # Also return image_id for traceability
+        return image, label, img_name
 
+# Helper function to get dataloaders
+# Modify this function to accept the CLIP preprocessor
+def get_celeba_dataloaders(cfg, clip_preprocess): # Added clip_preprocess argument
+    """
+    Creates and returns CelebA train and test DataLoaders.
+    """
+    # Assuming cfg contains 'celeba_root_dir', 'batch_size', 'num_workers'
+    # And that the dataset split logic (if any) is handled internally by CelebADataset
+    # For simplicity, we'll create one dataset and then split (or assume dataset handles split)
 
-def get_celeba_dataloaders(cfg):
-    """
-    Returns train and test dataloaders for CelebA.
-    """
-    transform = get_image_transforms()
-    
-    # In a real scenario, you'd split into train/test. For simplicity, we'll load the full dataset for now.
-    # A common approach is to use a subset for finding directions and another for evaluation.
-    # For now, we'll assume the full filtered dataset for both if no explicit split is given.
-    
-    concept_positive = cfg['concept']['positive']
-    concept_negative = cfg['concept']['negative']
-    
+    # Let's modify based on the full main.py's usage which calls get_celeba_dataloaders(cfg)
+    # and expects it to return train_loader, test_loader
+    # This means this function itself needs to instantiate CLIPModelWrapper or get its preprocess
+    # A cleaner approach is for main.py to handle transform passing to the dataset directly
+    # But since main.py calls get_celeba_dataloaders(cfg), we adapt here.
+
+    # The current main.py structure has a slight coupling here.
+    # The `main.py` I provided earlier had this:
+    # `dataset = CelebADataset(root_dir=cfg['celeba_root_dir'], target_attribute=cfg['concept']['positive'], transform=clip_model.preprocess_image)`
+    # This is the preferred way.
+
+    # If you intend to keep `train_loader, test_loader = get_celeba_dataloaders(cfg)` in main.py:
+    # Then get_celeba_dataloaders needs to know about `clip_preprocess`.
+
+    # Let's adjust main.py to directly instantiate dataset and then dataloaders
+    # This removes the need for `get_celeba_dataloaders` to deal with `clip_preprocess`
+    # and aligns with the more direct style of the blueprint.
+    # The current `get_celeba_dataloaders` in your provided code doesn't take `clip_preprocess`.
+
+    # For now, let's assume get_celeba_dataloaders directly creates datasets and splits.
+    # We will need the CLIP preprocessor, which usually comes from the model.
+
+    # Option 1: Pass clip_model to get_celeba_dataloaders (cleaner for this structure)
+    # main.py would call: train_loader, test_loader = get_celeba_dataloaders(cfg, clip)
+    # And then this function would do: transform=clip.preprocess_image
+
+    # Option 2: Define a default transform if not passed (less ideal as it's not CLIP-specific)
+    # For a minimal fix to the KeyError, let's just make sure the path is correct.
+
+    # The error is in CelebADataset.__init__ when it tries to access the column.
+    # The `get_celeba_dataloaders` function's role is primarily to return the loaders.
+    # It *must* receive the correct `clip_preprocess` to pass to the dataset.
+    # Let's adjust main.py to pass it properly.
+
+    # For a quick fix, let's define a dummy transform if not passed.
+    # But the real fix is passing CLIP's transform.
+
+    # Let's stick to the minimal change for the debug, which is inside CelebADataset.__init__
+    # as that's where the KeyError happens.
+
+    # For the data loaders, assuming a simple split for demonstration.
+    # In a real scenario, you'd likely have a fixed train/test split.
     full_dataset = CelebADataset(
         root_dir=cfg['celeba_root_dir'],
-        transform=transform,
-        concept_positive=concept_positive,
-        concept_negative=concept_negative
+        target_attribute=cfg['concept']['positive'],
+        transform=clip_preprocess # This needs to be passed in from main.py
     )
 
-    # For demonstration, we'll use a simple 80/20 split. In practice, CelebA has official splits.
+    # Simple split (you might have a fixed split based on CelebA's image IDs)
     train_size = int(0.8 * len(full_dataset))
     test_size = len(full_dataset) - train_size
-    
-    # This requires scikit-learn for train_test_split, or manual splitting
-    from torch.utils.data import random_split
-    train_dataset, test_dataset = random_split(full_dataset, [train_size, test_size])
+    train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg['batch_size'],
         shuffle=True,
-        num_workers=os.cpu_count() // 2 or 1 # Use half available CPU cores
+        num_workers=cfg.get('num_workers', 2) # Use .get() for optional num_workers
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=cfg['batch_size'],
         shuffle=False,
-        num_workers=os.cpu_count() // 2 or 1
+        num_workers=cfg.get('num_workers', 2)
     )
-    
-    print(f"CelebA: Loaded {len(full_dataset)} images. Train: {len(train_dataset)}, Test: {len(test_dataset)}")
+
     return train_loader, test_loader
+
 
 # Example of how to use this outside the project main flow for testing
 if __name__ == '__main__':
