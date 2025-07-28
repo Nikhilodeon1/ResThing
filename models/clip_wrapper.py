@@ -49,6 +49,48 @@ class CLIPModelWrapper:
             text_features = self.model.get_text_features(**inputs)
             return text_features.cpu() # Return to CPU
 
+    def get_latents(self, dataloader):
+        """
+        Collects all image embeddings (latents) and their corresponding labels
+        from a DataLoader.
+        
+        Args:
+            dataloader (torch.utils.data.DataLoader): DataLoader providing images and labels.
+        
+        Returns:
+            tuple: (all_embeddings, all_labels, all_image_ids)
+                   all_embeddings (torch.Tensor): Concatenated image embeddings.
+                   all_labels (torch.Tensor): Concatenated labels.
+                   all_image_ids (list): List of image IDs from the dataset.
+        """
+        all_embeddings = []
+        all_labels = []
+        all_image_ids = []
+        
+        # Ensure model is in evaluation mode (should already be from __init__, but good practice)
+        self.model.eval() 
+        
+        with torch.no_grad():
+            for batch_images, batch_labels, batch_img_ids in dataloader:
+                # 1. Preprocess images using the dedicated preprocess_image method
+                #    This returns pixel_values tensor on CPU
+                preprocessed_images = self.preprocess_image(batch_images)
+                
+                # 2. Embed the preprocessed images
+                #    embed_image expects pixel_values tensor and moves it to the correct device internally
+                embeddings = self.embed_image(preprocessed_images) 
+                
+                # Collect embeddings and labels, ensuring they are on CPU
+                all_embeddings.append(embeddings.cpu())
+                all_labels.append(batch_labels.cpu())
+                all_image_ids.extend(batch_img_ids) # Extend the list for image IDs
+
+        # Concatenate all collected tensors
+        all_embeddings = torch.cat(all_embeddings, dim=0)
+        all_labels = torch.cat(all_labels, dim=0)
+        
+        return all_embeddings, all_labels, all_image_ids
+
     # --- ADD THIS NEW METHOD ---
     def preprocess_image(self, images):
         """
