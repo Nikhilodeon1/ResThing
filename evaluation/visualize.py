@@ -24,8 +24,8 @@ def create_tsne_plot(embeddings, labels, title="t-SNE Plot of Embeddings", save_
         embeddings_np = embeddings[sample_indices].cpu().numpy()
         labels_np = labels[sample_indices].cpu().numpy()
     else:
-        embeddings_np = embeddings
-        labels_np = labels.cpu().numpy()
+        embeddings_np = embeddings # Line 27
+        labels_np = labels # Line 28
 
     # Create TSNE model
     tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
