@@ -70,12 +70,19 @@ class CLIPModelWrapper:
         self.model.eval() 
         
         with torch.no_grad():
-            for batch_images, batch_labels, batch_img_ids in dataloader:
-                # IMPORTANT CHANGE HERE:
-                # batch_images from the DataLoader are ALREADY preprocessed tensors
-                # (pixel_values) because clip.preprocess_image was applied as the dataset's transform.
-                # So, we pass them directly to embed_image.
-                embeddings = self.embed_image(batch_images) # <<< MODIFIED LINE
+            for i, (batch_images, batch_labels, batch_img_ids) in enumerate(dataloader):
+                # --- NEW DIAGNOSTIC ADDITION START ---
+                print(f"\nDEBUG (get_latents batch {i}):")
+                print(f"  Type of batch_images: {type(batch_images)}")
+                if isinstance(batch_images, torch.Tensor):
+                    print(f"  Shape of batch_images: {batch_images.shape}")
+                    print(f"  Number of dimensions: {batch_images.dim()}")
+                else:
+                    print(f"  batch_images is NOT a torch.Tensor, it's {type(batch_images)}!")
+                # --- NEW DIAGNOSTIC ADDITION END ---
+
+                # This is the line that caused the error previously if the input wasn't 4D
+                embeddings = self.embed_image(batch_images) 
                 
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(batch_labels.cpu())

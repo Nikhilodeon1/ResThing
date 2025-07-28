@@ -55,9 +55,19 @@ class CelebADataset(Dataset):
         label = self.labels[idx]
 
         if self.transform:
-            image = self.transform(image)
-
-        return image, label, img_name
+            transformed_image = self.transform(image) # Apply transform
+            # --- NEW DIAGNOSTIC ADDITION START ---
+            print(f"\nDEBUG (CelebADataset __getitem__ for {img_name}):")
+            print(f"  Type after transform: {type(transformed_image)}")
+            if isinstance(transformed_image, torch.Tensor):
+                print(f"  Shape after transform: {transformed_image.shape}")
+                print(f"  Number of dimensions: {transformed_image.dim()}")
+            else:
+                print(f"  Transformed image is NOT a torch.Tensor, it's {type(transformed_image)}!")
+            # --- NEW DIAGNOSTIC ADDITION END ---
+            return transformed_image, label, img_name
+        else:
+            raise ValueError("Transform must be provided for CelebADataset to preprocess images for CLIP.")
 
 # Helper function to get dataloaders
 # Modify this function to accept the CLIP preprocessor
@@ -117,22 +127,36 @@ def get_celeba_dataloaders(cfg, clip_preprocess): # Added clip_preprocess argume
         transform=clip_preprocess # This needs to be passed in from main.py
     )
 
+    # Define a custom collate_fn for the DataLoader
+    # This collate_fn handles the batching of data yielded by __getitem__
+    def custom_collate_fn(batch):
+        # batch is a list of tuples: (transformed_image, label, img_name)
+        # where transformed_image is already a 4D tensor (1, C, H, W)
+        
+        images = torch.cat([item[0] for item in batch], dim=0) # Concatenate along the batch dimension
+        labels = torch.tensor([item[1] for item in batch]) # Convert labels to a tensor
+        img_ids = [item[2] for item in batch] # Keep image IDs as a list
+
+        return images, labels, img_ids
+
     # Simple split (you might have a fixed split based on CelebA's image IDs)
     train_size = int(0.8 * len(full_dataset))
     test_size = len(full_dataset) - train_size
-    train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
+    train_dataset, test_dataset = random_split(full_dataset, [train_size, test_size])
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg['batch_size'],
         shuffle=True,
-        num_workers=cfg.get('num_workers', 2) # Use .get() for optional num_workers
+        num_workers=cfg.get('num_workers', 2),
+        collate_fn=custom_collate_fn # <<< ADD THIS
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=cfg['batch_size'],
         shuffle=False,
-        num_workers=cfg.get('num_workers', 2)
+        num_workers=cfg.get('num_workers', 2),
+        collate_fn=custom_collate_fn # <<< ADD THIS
     )
 
     return train_loader, test_loader
