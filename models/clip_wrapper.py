@@ -67,25 +67,20 @@ class CLIPModelWrapper:
         all_labels = []
         all_image_ids = []
         
-        # Ensure model is in evaluation mode (should already be from __init__, but good practice)
         self.model.eval() 
         
         with torch.no_grad():
             for batch_images, batch_labels, batch_img_ids in dataloader:
-                # 1. Preprocess images using the dedicated preprocess_image method
-                #    This returns pixel_values tensor on CPU
-                preprocessed_images = self.preprocess_image(batch_images)
+                # IMPORTANT CHANGE HERE:
+                # batch_images from the DataLoader are ALREADY preprocessed tensors
+                # (pixel_values) because clip.preprocess_image was applied as the dataset's transform.
+                # So, we pass them directly to embed_image.
+                embeddings = self.embed_image(batch_images) # <<< MODIFIED LINE
                 
-                # 2. Embed the preprocessed images
-                #    embed_image expects pixel_values tensor and moves it to the correct device internally
-                embeddings = self.embed_image(preprocessed_images) 
-                
-                # Collect embeddings and labels, ensuring they are on CPU
                 all_embeddings.append(embeddings.cpu())
                 all_labels.append(batch_labels.cpu())
-                all_image_ids.extend(batch_img_ids) # Extend the list for image IDs
+                all_image_ids.extend(batch_img_ids)
 
-        # Concatenate all collected tensors
         all_embeddings = torch.cat(all_embeddings, dim=0)
         all_labels = torch.cat(all_labels, dim=0)
         
