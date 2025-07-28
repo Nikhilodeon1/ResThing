@@ -40,7 +40,7 @@ def main():
     # Phase 1: Data Preparation & Loading
     train_loader, test_loader = None, None
     if cfg['dataset'] == 'CelebA':
-        train_loader, test_loader = get_celeba_dataloaders(cfg)
+        train_loader, test_loader = get_celeba_dataloaders(cfg, clip.preprocess_image)
     elif cfg['dataset'] == 'CUB-200':
         train_loader, test_loader = get_cub_dataloaders(cfg)
     elif cfg['dataset'] == 'ImageNet':
