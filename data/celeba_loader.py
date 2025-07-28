@@ -16,34 +16,43 @@ class CelebADataset(Dataset):
         """
         self.root_dir = root_dir
         self.transform = transform
-        self.img_dir = os.path.join(root_dir, 'images') # Assuming images are in a subfolder 'images'
+        self.img_dir = os.path.join(root_dir, 'img_align_celeba') # Standard CelebA image folder name
         self.attr_file = os.path.join(root_dir, 'list_attr_celeba.csv')
 
-        # --- DIAGNOSTIC ADDITION START ---
         print(f"DEBUG (CelebADataset): Attempting to load attribute file from: {self.attr_file}")
         if not os.path.exists(self.attr_file):
             raise FileNotFoundError(f"DEBUG (CelebADataset): Attribute file NOT FOUND at: {self.attr_file}. Please check your path.")
-        # --- DIAGNOSTIC ADDITION END ---
 
         self.attr_df = pd.read_csv(self.attr_file)
-        self.attr_df = self.attr_df.set_index('image_id') # Assuming 'image_id' is the column name for the index
+        
+        # CelebA attribute file has 'image_id' as the first column, which needs to be the index
+        self.attr_df = self.attr_df.set_index('image_id')
 
-        # --- DIAGNOSTIC ADDITION START ---
         print(f"DEBUG (CelebADataset): Columns loaded into attr_df: {self.attr_df.columns.tolist()}")
-        # --- DIAGNOSTIC ADDITION END ---
 
         self.target_attribute = target_attribute
 
-        # This is the line (or very near it) that caused the KeyError
-        # Make sure the target_attribute is in the columns list *here*
+        # Ensure the target_attribute exists in the DataFrame's columns
         if self.target_attribute not in self.attr_df.columns:
             raise KeyError(f"DEBUG (CelebADataset): Configured target attribute '{self.target_attribute}' not found in loaded CSV columns. Available: {self.attr_df.columns.tolist()}")
 
-
-        # Filter for positive and negative samples based on the target attribute
-        # Assuming original labels are 1 and -1 as per CelebA standard
+        # The core of the fix:
+        # Instead of filtering into separate positive/negative indices,
+        # we load all image IDs and their corresponding labels for the target attribute.
+        # The 'labels' will contain 1s and -1s for the target_attribute (e.g., 'Smiling').
         self.image_ids = self.attr_df.index.tolist()
         self.labels = self.attr_df[self.target_attribute].loc[self.image_ids].values
+
+        # Debugging the labels to ensure they contain -1s and 1s
+        unique_labels = pd.Series(self.labels).unique()
+        print(f"DEBUG (CelebADataset): Unique labels for '{self.target_attribute}': {unique_labels}")
+        if not (-1 in unique_labels and 1 in unique_labels):
+            print(f"WARNING: Labels for '{self.target_attribute}' do not contain both 1 and -1. "
+                  "This might affect direction finding for binary attributes.")
+        
+        # No need for self.positive_indices or self.negative_indices for the DataLoader's __getitem__
+        # The direction_finder will handle separating them based on the labels.
+
 
     def __len__(self):
         return len(self.image_ids)
@@ -55,16 +64,16 @@ class CelebADataset(Dataset):
         label = self.labels[idx]
 
         if self.transform:
-            transformed_image = self.transform(image) # Apply transform
-            # --- NEW DIAGNOSTIC ADDITION START ---
-            print(f"\nDEBUG (CelebADataset __getitem__ for {img_name}):")
-            print(f"  Type after transform: {type(transformed_image)}")
-            if isinstance(transformed_image, torch.Tensor):
-                print(f"  Shape after transform: {transformed_image.shape}")
-                print(f"  Number of dimensions: {transformed_image.dim()}")
-            else:
-                print(f"  Transformed image is NOT a torch.Tensor, it's {type(transformed_image)}!")
-            # --- NEW DIAGNOSTIC ADDITION END ---
+            transformed_image = self.transform(image)
+            # DEBUG
+            # print(f"\nDEBUG (CelebADataset __getitem__ for {img_name}):")
+            # print(f"  Type after transform: {type(transformed_image)}")
+            # if isinstance(transformed_image, torch.Tensor):
+            #     print(f"  Shape after transform: {transformed_image.shape}")
+            #     print(f"  Number of dimensions: {transformed_image.dim()}")
+            # else:
+            #     print(f"  Transformed image is NOT a torch.Tensor, it's {type(transformed_image)}!")
+            # END DEBUG
             return transformed_image, label, img_name
         else:
             raise ValueError("Transform must be provided for CelebADataset to preprocess images for CLIP.")
