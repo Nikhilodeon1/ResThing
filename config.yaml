@@ -1,23 +1,26 @@
 # config.yaml
-dataset: CelebA # Options: CelebA, CUB-200, ImageNet
+
+dataset: CelebA
 concept:
   positive: Smiling
   negative: Not_Smiling
 batch_size: 32
 model_name: openai/clip-vit-base-patch32
 surgery_alpha: 1.0
-output_dir: ./outputs # This will create outputs folder inside /content/ResThing/outputs
+output_dir: ./outputs
 save_tsne: True
+
+# --- Baselines ---
 run_prompt_baseline: True
-run_linear_probe_baseline: True
 run_random_edit_baseline: True
+run_linear_probe_baseline: True # Set to True to run the linear_probe.py baseline
 
-# --- Dataset Root Directories (UPDATED) ---
-# Path from /content/ResThing to /content/data/celeba
+# --- Optional Evaluation Modules ---
+run_latent_probe: True         # Set to True to run the latent_probe.py evaluation
+run_retrieval_eval: True       # Set to True to run the retrieval.py evaluation
+retrieval_top_k: 5             # Parameter for retrieval_eval: Number of top items to consider
+
+# --- Dataset Root Directories ---
 celeba_root_dir: "../data/celeba"
-
-# Path from /content/ResThing to /content/data/cub
 cub_root_dir: "../data/cub"
-
-# Path from /content/ResThing to /content/data/imagenet (if applicable)
 imagenet_root_dir: "../data/imagenet"
