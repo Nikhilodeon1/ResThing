@@ -1,16 +1,23 @@
 # config.yaml
-dataset: CelebA # Options: CelebA, CUB-200, ImageNet (for now, will expand later)
+dataset: CelebA # Options: CelebA, CUB-200, ImageNet
 concept:
   positive: Smiling
   negative: Not_Smiling
 batch_size: 32
 model_name: openai/clip-vit-base-patch32
-surgery_alpha: 1.0 # Scaling factor for latent surgery
-output_dir: ./outputs
+surgery_alpha: 1.0
+output_dir: ./outputs # This will create outputs folder inside /content/ResThing/outputs
 save_tsne: True
 run_prompt_baseline: True
 run_linear_probe_baseline: True
 run_random_edit_baseline: True
-celeba_root_dir: "/content/drive/MyDrive/Paper2/sigmaPack121" # Path to your CelebA dataset
-cub_root_dir: "/content/drive/MyDrive/Paper2/CUB_200_2011" # Example path for CUB-200
-imagenet_root_dir: "/content/drive/MyDrive/Paper2/ImageNet" # Example path for ImageNet
+
+# --- Dataset Root Directories (UPDATED) ---
+# Path from /content/ResThing to /content/data/celeba
+celeba_root_dir: "../data/celeba"
+
+# Path from /content/ResThing to /content/data/cub
+cub_root_dir: "../data/cub"
+
+# Path from /content/ResThing to /content/data/imagenet (if applicable)
+imagenet_root_dir: "../data/imagenet"
