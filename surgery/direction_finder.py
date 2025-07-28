@@ -1,54 +1,57 @@
 # surgery/direction_finder.py
 import torch
 
+# surgery/direction_finder.py
+
+import torch
+import numpy as np # Added this import if not already present
+
 def compute_direction(clip_wrapper, dataloader, cfg):
-    """
-    Computes the semantic direction vector in CLIP's latent space.
-    The direction is computed as the normalized vector from the mean embedding
-    of 'negative' concept images to the mean embedding of 'positive' concept images.
-    
-    Args:
-        clip_wrapper (CLIPModelWrapper): An instance of the CLIPModelWrapper.
-        dataloader (torch.utils.data.DataLoader): DataLoader for the dataset (e.g., CelebA).
-                                                Assumes it provides (images, labels, image_ids),
-                                                where labels are 0 for negative, 1 for positive.
-        cfg (dict): Configuration dictionary containing 'concept' (positive/negative strings).
-    Returns:
-        torch.Tensor: The normalized direction vector.
-    """
-    positive_embeddings = []
-    negative_embeddings = []
+    print("\n--- Phase 2.1: Computing Semantic Direction ---")
 
-    print(f"Computing direction vector for concept: {cfg['concept']['positive']} vs {cfg['concept']['negative']}")
-
-    # Ensure get_latents is called from clip_wrapper to get all embeddings
+    # Get all embeddings and labels from the dataloader
+    # The dataloader now provides images preprocessed by CLIP's preprocess_image
+    # And labels which are 1 or -1 for the 'Smiling' attribute.
     all_embeddings, all_labels, _ = clip_wrapper.get_latents(dataloader)
 
-    # Filter embeddings based on labels
-    for i, label in enumerate(all_labels):
-        if label == 1: # Assuming 1 for positive concept
-            positive_embeddings.append(all_embeddings[i])
-        elif label == 0: # Assuming 0 for negative concept
-            negative_embeddings.append(all_embeddings[i])
+    # Ensure labels are PyTorch tensors if they aren't already
+    if not isinstance(all_labels, torch.Tensor):
+        all_labels = torch.tensor(all_labels, dtype=torch.long) # Use long for labels
 
-    if not positive_embeddings:
-        raise ValueError(f"No positive concept embeddings found for '{cfg['concept']['positive']}'. "
+    # Get the target attribute name from config (e.g., 'Smiling')
+    target_attribute_name = cfg['concept']['positive'] # This will be 'Smiling'
+
+    # Filter embeddings based on the actual labels (1 for present, -1 for absent)
+    # The 'positive' concept corresponds to label 1
+    positive_concept_embeddings = all_embeddings[all_labels == 1]
+    # The 'negative' concept corresponds to label -1
+    negative_concept_embeddings = all_embeddings[all_labels == -1]
+
+
+    if len(positive_concept_embeddings) == 0:
+        raise ValueError(f"No positive concept embeddings found for '{target_attribute_name}'. "
                          "Check dataset labels or filtering logic.")
-    if not negative_embeddings:
-        raise ValueError(f"No negative concept embeddings found for '{cfg['concept']['negative']}'. "
+    if len(negative_concept_embeddings) == 0:
+        # This is the specific error you were getting, now handled by looking for -1
+        raise ValueError(f"No negative concept embeddings found (i.e., no -1 labels for '{target_attribute_name}'). "
                          "Check dataset labels or filtering logic.")
 
-    mean_positive_embedding = torch.stack(positive_embeddings).mean(dim=0)
-    mean_negative_embedding = torch.stack(negative_embeddings).mean(dim=0)
+    print(f"Found {len(positive_concept_embeddings)} positive embeddings for '{target_attribute_name}'.")
+    print(f"Found {len(negative_concept_embeddings)} negative embeddings for '{target_attribute_name}'.")
 
-    # Compute the raw direction vector
-    raw_direction = mean_positive_embedding - mean_negative_embedding
 
-    # Normalize the direction vector to get a unit vector
-    direction_unit_vector = raw_direction / torch.norm(raw_direction)
-    
-    print(f"Direction vector computed. Shape: {direction_unit_vector.shape}")
-    return direction_unit_vector.cpu()
+    # Calculate the mean embedding for each concept
+    mean_positive_embedding = positive_concept_embeddings.mean(dim=0)
+    mean_negative_embedding = negative_concept_embeddings.mean(dim=0)
+
+    # Compute the direction vector
+    direction = mean_positive_embedding - mean_negative_embedding
+
+    # Normalize the direction vector
+    direction = direction / direction.norm()
+
+    print(f"Semantic direction for '{target_attribute_name}' computed.")
+    return direction
 
 # Example of how to use this outside the project main flow for testing
 if __name__ == '__main__':
