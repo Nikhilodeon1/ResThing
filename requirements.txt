@@ -1,0 +1,12 @@
+# File: requirements.txt
+transformers
+scikit-learn
+numpy
+pandas
+matplotlib
+seaborn
+tqdm
+umap-learn
+torch
+torchvision
+PyYAML
