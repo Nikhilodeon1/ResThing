@@ -61,19 +61,12 @@ class CelebADataset(Dataset):
         img_name = self.image_ids[idx]
         img_path = os.path.join(self.img_dir, img_name)
         image = Image.open(img_path).convert('RGB')
-        label = self.labels[idx]
+        
+        # CHANGE THIS LINE:
+        label = int(self.labels[idx]) # Ensures label is an integer (1 or -1)
 
         if self.transform:
             transformed_image = self.transform(image)
-            # DEBUG
-            # print(f"\nDEBUG (CelebADataset __getitem__ for {img_name}):")
-            # print(f"  Type after transform: {type(transformed_image)}")
-            # if isinstance(transformed_image, torch.Tensor):
-            #     print(f"  Shape after transform: {transformed_image.shape}")
-            #     print(f"  Number of dimensions: {transformed_image.dim()}")
-            # else:
-            #     print(f"  Transformed image is NOT a torch.Tensor, it's {type(transformed_image)}!")
-            # END DEBUG
             return transformed_image, label, img_name
         else:
             raise ValueError("Transform must be provided for CelebADataset to preprocess images for CLIP.")
