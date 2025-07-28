@@ -7,10 +7,10 @@ import numpy as np  # Added for numpy operations in evaluation
 from utils.config_loader import load_config
 from data.celeba_loader import get_celeba_dataloaders
 from data.cub_loader import get_cub_dataloaders
-from data.imagenet_loader import get_imagenet_dataloaders # Will load all images for ImageNet, no labels for concepts though
+from data.imagenet_loader import get_imagenet_dataloaders
 from models.clip_wrapper import CLIPModelWrapper
-from surgery.direction_finder import compute_direction # Assuming this computes the direction vector
-from surgery.edit_embedding import apply_surgery # Assuming this applies surgery and returns edited/original embeddings
+from surgery.direction_finder import compute_direction
+from surgery.edit_embedding import apply_surgery
 from baselines.prompt_tuning import prompt_tuning_baseline
 from baselines.random_edit import random_edit_baseline
 from evaluation.metrics import calculate_accuracy, calculate_cosine_similarity, calculate_mean_confidence
@@ -37,20 +37,25 @@ def main():
     # Create output directory if it doesn't exist
     os.makedirs(cfg["output_dir"], exist_ok=True)
     
+    # --- IMPORTANT FIX: Initialize CLIP ModelWrapper HERE, before data loaders ---
+    clip = CLIPModelWrapper(cfg["model_name"], device=device)
+    # --- END IMPORTANT FIX ---
+
     # Phase 1: Data Preparation & Loading
     train_loader, test_loader = None, None
     if cfg['dataset'] == 'CelebA':
         train_loader, test_loader = get_celeba_dataloaders(cfg, clip.preprocess_image)
     elif cfg['dataset'] == 'CUB-200':
-        train_loader, test_loader = get_cub_dataloaders(cfg)
+        train_loader, test_loader = get_cub_dataloaders(cfg, clip.preprocess_image) # Assuming get_cub_dataloaders also accepts it
     elif cfg['dataset'] == 'ImageNet':
-        train_loader, test_loader = get_imagenet_dataloaders(cfg)
+        train_loader, test_loader = get_imagenet_dataloaders(cfg, clip.preprocess_image) # Assuming get_imagenet_dataloaders also accepts it
     else:
         raise ValueError(f"Unsupported dataset specified in config: {cfg['dataset']}")
 
     print(f"\nPhase 1: Data Preparation & Loading Complete.")
     print(f"Train DataLoader batches: {len(train_loader)}")
     print(f"Test DataLoader batches: {len(test_loader)}")
+
 
     # Phase 2: Model Setup & Latent Surgery Implementation
     print("\n--- Phase 2: Model Setup & Latent Surgery Implementation ---")
