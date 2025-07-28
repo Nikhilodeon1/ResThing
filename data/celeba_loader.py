@@ -16,7 +16,7 @@ class CelebADataset(Dataset):
         """
         self.root_dir = root_dir
         self.transform = transform
-        self.img_dir = os.path.join(root_dir, 'img_align_celeba') # Standard CelebA image folder name
+        self.img_dir = os.path.join(root_dir, 'images') # Standard CelebA image folder name
         self.attr_file = os.path.join(root_dir, 'list_attr_celeba.csv')
 
         print(f"DEBUG (CelebADataset): Attempting to load attribute file from: {self.attr_file}")
