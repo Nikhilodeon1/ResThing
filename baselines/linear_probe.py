@@ -3,6 +3,7 @@
 # Re-using the LatentProbe class from surgery for consistency in this baseline
 # The distinction is more in how and when it's used within main.py
 from surgery.latent_probe import LatentProbe
+import torch
 
 def run_linear_probe_baseline(embeddings: torch.Tensor, labels: torch.Tensor,
                               model_name="Original CLIP Embeddings") -> dict:
