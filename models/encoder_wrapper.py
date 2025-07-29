@@ -2,7 +2,7 @@
 
 import torch
 from transformers import AutoProcessor, AutoModel
-from PIL import Image 
+from PIL import Image # For type hinting/clarity
 
 class EncoderWrapper:
     def __init__(self, model_name="openai/clip-vit-base-patch32", device="cpu"):
@@ -10,11 +10,17 @@ class EncoderWrapper:
         self.model_name = model_name
         print(f"Loading encoder: {model_name} to {device}")
         
+        # Load processor and model using Auto classes for generality
         self.processor = AutoProcessor.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(device)
-        self.model.eval()
+        self.model.eval() # Set model to evaluation mode
 
-        self.is_clip_model = "clip" in model_name.lower() or "vit" in model_name.lower() # Added "vit" for robustness
+        # Determine model type for specific embedding extraction logic
+        # Robust check for CLIP models based on name or presence of specific methods
+        model_name_lower = model_name.lower()
+        self.is_clip_model = ("clip" in model_name_lower or 
+                              "vit" in model_name_lower or 
+                              hasattr(self.model, 'get_image_features')) # More robust check
         print(f"Detected model type: {'CLIP' if self.is_clip_model else 'Generic/Vision-only'}")
 
     def embed_image(self, images):
@@ -34,21 +40,22 @@ class EncoderWrapper:
             )
         
         with torch.no_grad():
+            # Crucial: For CLIP models, explicitly call get_image_features.
+            # This avoids the error where the main model.forward() expects text inputs.
             if self.is_clip_model:
-                # For CLIP models, explicitly call get_image_features to avoid text model issues
                 image_features = self.model.get_image_features(pixel_values=images.to(self.device))
             else:
-                # For other models like DINOv2, use the standard forward pass and extract features
+                # For other models (like DINOv2), use the standard model forward pass
+                # and then extract features from its typical outputs.
                 inputs = {'pixel_values': images.to(self.device)}
                 outputs = self.model(**inputs)
                 
                 if hasattr(outputs, 'last_hidden_state'):
-                    # Typically for Vision Transformers (like DINOv2, or ViT without specific CLIP head)
-                    # We often mean-pool the tokens (excluding the CLS token if present at index 0)
-                    # For simplicity, let's just mean pool all tokens for now.
+                    # Common for Vision Transformers (e.g., DINOv2, pure ViT models)
+                    # Mean pool tokens to get a single embedding vector per image
                     image_features = outputs.last_hidden_state.mean(dim=1)
                 elif hasattr(outputs, 'pooler_output'):
-                    # Some models might have a dedicated pooler_output (e.g., from a pooling layer)
+                    # Some models might provide a dedicated pooled output
                     image_features = outputs.pooler_output
                 else:
                     raise NotImplementedError(
@@ -71,7 +78,7 @@ class EncoderWrapper:
             
         with torch.no_grad():
             inputs = self.processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
-            # For CLIP, call get_text_features
+            # For CLIP models, explicitly call get_text_features
             text_features = self.model.get_text_features(**inputs) 
             return text_features.cpu()
 
