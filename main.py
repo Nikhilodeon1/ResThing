@@ -127,7 +127,7 @@ def main():
         print("\n--- Phase 2: Latent Surgery Implementation ---")
 
         # Compute semantic direction
-        direction = compute_direction(encoder, train_loader, cfg)
+        direction = direction_finder.compute_direction(encoder, train_loader, cfg)
         
         # Apply latent surgery to test embeddings
         print(f"Applying latent surgery with alpha={cfg['surgery_alpha']}...")
