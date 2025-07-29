@@ -327,7 +327,7 @@ def get_model_predictions(encoder, embeddings, concept, device):
     """
     # Generate text embeddings for positive and negative prompts
     pos_text_embedding = encoder.embed_text(concept['positive']).to(device)
-    neg_text_embedding = encoder.get_text_embedding(concept['negative']).to(device)
+    neg_text_embedding = encoder.embed_text(concept['negative']).to(device)
 
     # Normalize image and text embeddings for cosine similarity
     image_embeddings_norm = F.normalize(embeddings.to(device), p=2, dim=1)
