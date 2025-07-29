@@ -4,6 +4,7 @@ dataset: CelebA
 concept: {'positive': 'Smiling', 'negative': 'Not_Smiling'}
 batch_size: 32
 model_name: openai/clip-vit-base-patch32 # Default encoder
+alternative_encoder_name: "openai/clip-rn50" # Or "facebook/dinov2-base" for DINOv2
 surgery_alpha: 1.0
 output_dir: ./outputs
 save_tsne: True
