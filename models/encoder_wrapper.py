@@ -2,7 +2,7 @@
 
 import torch
 from transformers import AutoProcessor, AutoModel
-from PIL import Image # For type hinting/clarity
+from PIL import Image 
 
 class EncoderWrapper:
     def __init__(self, model_name="openai/clip-vit-base-patch32", device="cpu"):
@@ -10,13 +10,11 @@ class EncoderWrapper:
         self.model_name = model_name
         print(f"Loading encoder: {model_name} to {device}")
         
-        # Load processor and model using Auto classes for generality
         self.processor = AutoProcessor.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(device)
-        self.model.eval() # Set model to evaluation mode
+        self.model.eval()
 
-        # Determine model type for specific embedding extraction logic
-        self.is_clip_model = "clip" in model_name.lower()
+        self.is_clip_model = "clip" in model_name.lower() or "vit" in model_name.lower() # Added "vit" for robustness
         print(f"Detected model type: {'CLIP' if self.is_clip_model else 'Generic/Vision-only'}")
 
     def embed_image(self, images):
@@ -36,22 +34,27 @@ class EncoderWrapper:
             )
         
         with torch.no_grad():
-            inputs = {'pixel_values': images.to(self.device)}
-            outputs = self.model(**inputs)
-
             if self.is_clip_model:
-                # CLIP models typically have a get_image_features method or return image_embeds
-                image_features = outputs.image_embeds if hasattr(outputs, 'image_embeds') else outputs.pooler_output
-            elif hasattr(outputs, 'last_hidden_state'):
-                # DINOv2 and similar vision transformers return last_hidden_state
-                # Often, pooling is needed (e.g., mean pooling across tokens, or using the CLS token)
-                # For simplicity, let's mean pool tokens (excluding CLS if present at index 0)
-                # Assuming outputs.last_hidden_state is (batch_size, num_tokens, hidden_dim)
-                # This might need refinement based on specific model architecture.
-                image_features = outputs.last_hidden_state.mean(dim=1)
+                # For CLIP models, explicitly call get_image_features to avoid text model issues
+                image_features = self.model.get_image_features(pixel_values=images.to(self.device))
             else:
-                raise NotImplementedError(f"Embedding extraction not implemented for model type: {self.model_name}. "
-                                          "Please check model output structure.")
+                # For other models like DINOv2, use the standard forward pass and extract features
+                inputs = {'pixel_values': images.to(self.device)}
+                outputs = self.model(**inputs)
+                
+                if hasattr(outputs, 'last_hidden_state'):
+                    # Typically for Vision Transformers (like DINOv2, or ViT without specific CLIP head)
+                    # We often mean-pool the tokens (excluding the CLS token if present at index 0)
+                    # For simplicity, let's just mean pool all tokens for now.
+                    image_features = outputs.last_hidden_state.mean(dim=1)
+                elif hasattr(outputs, 'pooler_output'):
+                    # Some models might have a dedicated pooler_output (e.g., from a pooling layer)
+                    image_features = outputs.pooler_output
+                else:
+                    raise NotImplementedError(
+                        f"Embedding extraction logic not found for model type: {self.model_name}. "
+                        "Expected 'last_hidden_state' or 'pooler_output' from model's forward pass outputs."
+                    )
             
             return image_features.cpu() # Return to CPU
 
@@ -68,9 +71,9 @@ class EncoderWrapper:
             
         with torch.no_grad():
             inputs = self.processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
-            outputs = self.model(**inputs)
-            text_features = outputs.text_embeds if hasattr(outputs, 'text_embeds') else outputs.pooler_output
-            return text_features.cpu() # Return to CPU
+            # For CLIP, call get_text_features
+            text_features = self.model.get_text_features(**inputs) 
+            return text_features.cpu()
 
     def preprocess_image(self, images):
         """
@@ -82,8 +85,6 @@ class EncoderWrapper:
             torch.Tensor: Preprocessed image tensor(s) (pixel_values) suitable for the encoder.
                           This will be on CPU by default.
         """
-        # AutoProcessor's __call__ method handles resizing, normalization, etc.
-        # It returns a BatchEncoding, from which we get pixel_values.
         processed_input = self.processor(images=images, return_tensors="pt")
         return processed_input.pixel_values
 
@@ -109,8 +110,6 @@ class EncoderWrapper:
         
         with torch.no_grad():
             for batch_images, batch_labels, batch_img_ids in dataloader:
-                # batch_images from the DataLoader are ALREADY preprocessed tensors
-                # (pixel_values) because preprocess_image was applied as the dataset's transform.
                 embeddings = self.embed_image(batch_images) 
                 
                 all_embeddings.append(embeddings.cpu())
