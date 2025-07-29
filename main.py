@@ -250,7 +250,7 @@ def main():
 
         print(f"Generating t-SNE plot for {len(test_embeddings_edited_ls)} embeddings...")
         create_tsne_plot(test_embeddings_edited_ls, test_labels_for_ls, "t-SNE of Latent Surgery Edited Embeddings", os.path.join(output_dir, 'tsne_latent_surgery.png'))
-        
+
         if cfg.get('run_random_edit_baseline', True):
             print(f"Generating t-SNE plot for {len(random_edited_embeddings)} embeddings...")
             create_tsne_plot(random_edited_embeddings, test_labels_for_ls, "t-SNE of Random Edit Embeddings", os.path.join(output_dir, 'tsne_random_edit.png'))
@@ -258,22 +258,29 @@ def main():
         # Plot cosine similarity change histograms
         print(f"Generating histogram for {len(test_embeddings_orig_for_ls)} cosine similarities (Latent Surgery)...")
         # Pass the tensor of similarities, not the mean
-        plot_cosine_similarity_hist(calculate_cosine_similarity(test_embeddings_orig_for_ls, test_embeddings_edited_ls), 
-                                    os.path.join(output_dir, 'cosine_similarity_surgery_hist.png'), 
-                                    "Cosine Similarity Change (Latent Surgery)")
-
+        plot_cosine_similarity_hist(
+            calculate_cosine_similarity(test_embeddings_orig_for_ls, test_embeddings_edited_ls), 
+            "Cosine Similarity Change (Latent Surgery)",  # Corrected: This is now the 'title' argument
+            os.path.join(output_dir, 'cosine_similarity_surgery_hist.png') # Corrected: This is now the 'save_path' argument
+        )
+        
         if cfg.get('run_random_edit_baseline', True):
             print(f"Generating histogram for {len(random_edited_embeddings)} cosine similarities (Random Edit)...")
-            # Pass the tensor of similarities, not the mean
-            plot_cosine_similarity_hist(calculate_cosine_similarity(test_embeddings_orig_for_ls, random_edited_embeddings), 
-                                        os.path.join(output_dir, 'cosine_similarity_random_hist.png'), 
-                                        "Cosine Similarity Change (Random Edit)")
+            # Pass the tensor of similarities, then the title, then the save_path
+            plot_cosine_similarity_hist(
+                calculate_cosine_similarity(test_embeddings_orig_for_ls, random_edited_embeddings), 
+                "Cosine Similarity Change (Random Edit)", # Corrected: This is now the 'title' argument
+                os.path.join(output_dir, 'cosine_similarity_random_hist.png') # Corrected: This is now the 'save_path' argument
+            )
         
         if cfg.get('run_splice_baseline', False):
             print(f"Generating histogram for {len(splice_edited_embeddings)} cosine similarities (SpLiCE)...")
-            plot_cosine_similarity_hist(calculate_cosine_similarity(test_embeddings_orig_for_ls, splice_edited_embeddings), 
-                                        os.path.join(output_dir, 'cosine_similarity_splice_hist.png'), 
-                                        "Cosine Similarity Change (SpLiCE)")
+            # Pass the tensor of similarities, then the title, then the save_path
+            plot_cosine_similarity_hist(
+                calculate_cosine_similarity(test_embeddings_orig_for_ls, splice_edited_embeddings), 
+                "Cosine Similarity Change (SpLiCE)", # Corrected: This is now the 'title' argument
+                os.path.join(output_dir, 'cosine_similarity_splice_hist.png') # Corrected: This is now the 'save_path' argument
+            )
 
         all_results.append(run_results)
         print(f"\n--- Run {run_idx + 1}/{num_runs} Complete ---")
