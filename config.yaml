@@ -5,7 +5,7 @@ concept: {'positive': 'Smiling', 'negative': 'Not_Smiling'}
 batch_size: 32
 model_name: openai/clip-vit-base-patch32 # Default encoder
 surgery_alpha: 1.0
-output_dir: ./outputs
+output_dir: /content/ResThing/outputs
 save_tsne: True
 run_prompt_baseline: True
 run_random_edit_baseline: True
