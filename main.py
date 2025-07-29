@@ -246,14 +246,14 @@ def main():
 
         # --- Visualizations ---
         print(f"\nGenerating t-SNE plot for {len(test_embeddings_orig_for_ls)} embeddings...")
-        create_tsne_plot(test_embeddings_orig_for_ls, test_labels_for_ls, os.path.join(output_dir, 'tsne_original.png'), "t-SNE of Original Embeddings")
+        create_tsne_plot(test_embeddings_orig_for_ls, test_labels_for_ls, "t-SNE of Original Embeddings", os.path.join(output_dir, 'tsne_original.png'))
 
         print(f"Generating t-SNE plot for {len(test_embeddings_edited_ls)} embeddings...")
-        create_tsne_plot(test_embeddings_edited_ls, test_labels_for_ls, os.path.join(output_dir, 'tsne_latent_surgery.png'), "t-SNE of Latent Surgery Edited Embeddings")
-
+        create_tsne_plot(test_embeddings_edited_ls, test_labels_for_ls, "t-SNE of Latent Surgery Edited Embeddings", os.path.join(output_dir, 'tsne_latent_surgery.png'))
+        
         if cfg.get('run_random_edit_baseline', True):
             print(f"Generating t-SNE plot for {len(random_edited_embeddings)} embeddings...")
-            create_tsne_plot(random_edited_embeddings, test_labels_for_ls, os.path.join(output_dir, 'tsne_random_edit.png'), "t-SNE of Random Edit Embeddings")
+            create_tsne_plot(random_edited_embeddings, test_labels_for_ls, "t-SNE of Random Edit Embeddings", os.path.join(output_dir, 'tsne_random_edit.png'))
         
         # Plot cosine similarity change histograms
         print(f"Generating histogram for {len(test_embeddings_orig_for_ls)} cosine similarities (Latent Surgery)...")
