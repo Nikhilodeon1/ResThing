@@ -58,6 +58,8 @@ def create_tsne_plot(embeddings, labels, title="t-SNE Plot of Embeddings", save_
     plt.ylabel("t-SNE Dimension 2")
     
     if save_path:
+        print(f"DEBUG (visualize.py): save_path = '{save_path}'") # <--- ADD THIS LINE
+        print(f"DEBUG (visualize.py): os.path.dirname(save_path) = '{os.path.dirname(save_path)}'") # <--- ADD THIS LINE
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path)
         print(f"t-SNE plot saved to {save_path}")
