@@ -120,7 +120,7 @@ def main():
         # Evaluate Latent Surgery
         print("\nEvaluating Latent Surgery:")
         # Latent Surgery uses prompt baseline for evaluation of concept change
-        ls_prompt_accuracy, ls_pos_conf, ls_neg_conf = run_prompt_tuning_baseline(
+        ls_prompt_accuracy, ls_pos_conf, ls_neg_conf = prompt_tuning_baseline(
             clip, test_embeddings_edited_ls, test_labels_for_ls, cfg['concept'], device
         )
         run_results['Latent_Surgery_Prompt_Accuracy'] = ls_prompt_accuracy
@@ -135,7 +135,7 @@ def main():
         # Run Prompt Tuning Baseline (Original Embeddings)
         if cfg.get('run_prompt_baseline', True):
             print("\nRunning Prompt Tuning Baseline for Original Embeddings...")
-            pt_accuracy, pt_pos_conf, pt_neg_conf = run_prompt_tuning_baseline(
+            pt_accuracy, pt_pos_conf, pt_neg_conf = prompt_tuning_baseline(
                 clip, test_embeddings_orig_for_ls, test_labels_for_ls, cfg['concept'], device
             )
             run_results['Original_Prompt_Accuracy'] = pt_accuracy
@@ -146,9 +146,9 @@ def main():
         # Run Random Edit Baseline
         if cfg.get('run_random_edit_baseline', True):
             print("\nEvaluating Random Edit Baseline:")
-            random_edited_embeddings = run_random_edit_baseline(test_embeddings_orig_for_ls, cfg['surgery_alpha'])
+            random_edited_embeddings = random_edit_baseline(test_embeddings_orig_for_ls, cfg['surgery_alpha'])
             
-            re_prompt_accuracy, re_pos_conf, re_neg_conf = run_prompt_tuning_baseline(
+            re_prompt_accuracy, re_pos_conf, re_neg_conf = prompt_tuning_baseline(
                 clip, random_edited_embeddings, test_labels_for_ls, cfg['concept'], device
             )
             run_results['Random_Edit_Prompt_Accuracy'] = re_prompt_accuracy
@@ -171,7 +171,7 @@ def main():
             print("SpLiCE Baseline complete.")
             
             # Evaluate SpLiCE similar to latent surgery
-            splice_prompt_accuracy, splice_pos_conf, splice_neg_conf = run_prompt_tuning_baseline(
+            splice_prompt_accuracy, splice_pos_conf, splice_neg_conf = prompt_tuning_baseline(
                 clip, splice_edited_embeddings, test_labels_for_ls, cfg['concept'], device
             )
             run_results['SpLiCE_Prompt_Accuracy'] = splice_prompt_accuracy
