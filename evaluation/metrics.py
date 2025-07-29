@@ -335,8 +335,8 @@ def get_model_predictions(encoder, embeddings, concept, device):
     neg_text_embedding_norm = F.normalize(neg_text_embedding, p=2, dim=0)
 
     # Calculate cosine similarity with positive and negative concept embeddings
-    pos_similarities = torch.matmul(image_embeddings_norm, pos_text_embedding_norm)
-    neg_similarities = torch.matmul(image_embeddings_norm, neg_text_embedding_norm)
+    pos_similarities = torch.matmul(image_embeddings_norm, pos_text_embedding_norm.T)
+    neg_similarities = torch.matmul(image_embeddings_norm, neg_text_embedding_norm.T)
 
     # Get predictions based on which concept is more similar
     # Convert similarities to a 2D tensor for softmax (batch_size, 2)
