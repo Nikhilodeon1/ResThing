@@ -326,7 +326,7 @@ def get_model_predictions(encoder, embeddings, concept, device):
         tuple: (predictions (torch.Tensor), confidences (torch.Tensor))
     """
     # Generate text embeddings for positive and negative prompts
-    pos_text_embedding = encoder.get_text_embedding(concept['positive']).to(device)
+    pos_text_embedding = encoder.embed_text(concept['positive']).to(device)
     neg_text_embedding = encoder.get_text_embedding(concept['negative']).to(device)
 
     # Normalize image and text embeddings for cosine similarity
