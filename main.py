@@ -8,7 +8,7 @@ from datetime import datetime
 from scipy import stats # For statistical tests
 import random # For geometric analysis random vector
 import shutil # For copying images for failure visualization
-
+from surgery import direction_finder, edit_embedding, latent_probe
 from models.encoder_wrapper import EncoderWrapper
 # Import all potential dataset loaders. You must ensure these files exist and have get_dataloaders
 from data.celeba_loader import get_celeba_dataloaders
