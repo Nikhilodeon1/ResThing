@@ -149,7 +149,10 @@ def evaluate_retrieval(query_embeddings, query_labels, query_image_ids, gallery_
         save_path (str, optional): Path to save results JSON. Defaults to None.
 
     Returns:
-        tuple: (mAP, top_k_accuracy)
+        tuple: (mAP, top_k_accuracy, all_retrieved_nn_indices)
+               all_retrieved_nn_indices is a list of lists, where each inner list
+               contains the original gallery indices of the top-k nearest neighbors
+               for a corresponding query.
     """
     print(f"Evaluating retrieval (Top-K={top_k}) for {len(query_embeddings)} queries...")
 
@@ -171,6 +174,16 @@ def evaluate_retrieval(query_embeddings, query_labels, query_image_ids, gallery_
 
     average_precisions = []
     top_k_correct_count = 0
+    all_retrieved_nn_indices = [] # Store lists of top-k indices for each query
+
+    # Get the original indices of the gallery embeddings that remain after masking
+    # This needs to be done once if the mask for exclusion is static
+    # Or, adjusted inside loop if mask depends on query_id which could be missing from gallery
+    
+    # Pre-calculate original indices of the gallery. This is used to map back `sorted_indices`
+    # which refer to the filtered array.
+    original_gallery_indices = np.arange(len(gallery_embeddings_np))
+
 
     for i in range(len(query_embeddings_norm)):
         query_embedding = query_embeddings_norm[i]
@@ -183,16 +196,18 @@ def evaluate_retrieval(query_embeddings, query_labels, query_image_ids, gallery_
         # Create a mask to exclude the query itself from the gallery
         # This assumes unique image IDs. If not, needs more robust handling.
         mask = np.ones(len(gallery_image_ids), dtype=bool)
-        if query_id in gallery_image_ids: # Check if query image ID is in gallery
-            try:
-                query_in_gallery_idx = gallery_image_ids.index(query_id)
-                mask[query_in_gallery_idx] = False # Exclude the query itself
-            except ValueError:
-                # If query_id not found for some reason (e.g., in different split/gallery)
-                pass
+        try:
+            # Find the index of the query_id in the gallery (if it exists there)
+            query_in_gallery_idx = gallery_image_ids.index(query_id)
+            # Ensure the query itself is not retrieved, if it's in the gallery
+            mask[query_in_gallery_idx] = False 
+        except ValueError:
+            # query_id not found in gallery_image_ids, so no need to mask it out.
+            pass
 
         similarities_filtered = similarities[mask]
         gallery_labels_filtered = gallery_labels_np[mask]
+        original_gallery_indices_filtered = original_gallery_indices[mask] # Get original indices of filtered items
         
         # Sort by similarity in descending order
         sorted_indices = np.argsort(similarities_filtered)[::-1]
@@ -213,6 +228,10 @@ def evaluate_retrieval(query_embeddings, query_labels, query_image_ids, gallery_
         # Check for Top-K accuracy: Is the query label present in top-k retrieved?
         if query_label in top_k_retrieved_labels_for_query:
             top_k_correct_count += 1
+        
+        # Store the original indices of the top-k nearest neighbors in the gallery
+        top_k_original_gallery_indices = original_gallery_indices_filtered[sorted_indices[:top_k]]
+        all_retrieved_nn_indices.append(top_k_original_gallery_indices.tolist())
             
     mAP = np.mean(average_precisions) if len(average_precisions) > 0 else 0.0
     top_k_accuracy = top_k_correct_count / len(query_embeddings_norm) if len(query_embeddings_norm) > 0 else 0.0
@@ -233,7 +252,7 @@ def evaluate_retrieval(query_embeddings, query_labels, query_image_ids, gallery_
             json.dump(results, f, indent=4)
         print(f"Retrieval results saved to {save_path}")
 
-    return mAP, top_k_accuracy
+    return mAP, top_k_accuracy, all_retrieved_nn_indices # NOW RETURNS 3 VALUES
 
 def perform_statistical_test(data1, data2, test_name="Comparison"):
     """
