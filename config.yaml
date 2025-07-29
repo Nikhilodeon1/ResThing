@@ -1,10 +1,10 @@
-# config.yaml
-
-dataset: CelebA
-concept: {'positive': 'Smiling', 'negative': 'Not_Smiling'}
+dataset: CelebA # Default dataset. Options: CelebA, CUB-200, ImageNet (if implemented)
+concept:
+  positive: Smiling
+  negative: Not_Smiling
 batch_size: 32
-model_name: openai/clip-vit-base-patch32 # Default encoder
-alternative_encoder_name: "openai/clip-rn50" # Or "facebook/dinov2-base" for DINOv2
+model_name: openai/clip-vit-base-patch32
+alternative_encoder_name: # e.g., facebook/dinov2-base or leave blank
 surgery_alpha: 1.0
 output_dir: ./outputs
 save_tsne: True
@@ -14,25 +14,14 @@ run_linear_probe_baseline: True
 run_latent_probe: True
 run_retrieval_eval: True
 retrieval_top_k: 5
+# Dataset root directories (adjust paths as necessary)
 celeba_root_dir: ../data/celeba
 cub_root_dir: ../data/cub
-imagenet_root_dir: ../data/imagenet
+imagenet_root_dir: ../data/imagenet # Ensure this points to your ImageNet data
+run_splice_baseline: False
+enable_geometric_analysis: False # Placeholder for more advanced geometric analysis
+enable_failure_mode_viz: False # Placeholder for visualizing failure modes
+num_runs_for_stats: 5 # Set to >1 to enable statistical significance testing
 
-# --- NEW FEATURES CONFIGURATION ---
-
-# Option for SpLiCE Baseline
-run_splice_baseline: False # Set to True to enable SpLiCE comparison
-
-# Option for geometric/theoretical analysis
-enable_geometric_analysis: False # Set to True to compute direction orthogonality, angle distributions etc.
-
-# Option to experiment with another encoder (e.g., DINOv2 or CLIP-B/16)
-# Specify model_name here (e.g., 'facebook/dinov2-base' or 'openai/clip-vit-base-patch16')
-# Make sure the chosen model is compatible with your environment.
-alternative_encoder_name: "" # Leave empty to use default model_name, or specify another HuggingFace model ID
-
-# Option for failure mode visualizations
-enable_failure_mode_viz: False # Set to True to generate visualizations of edit failures
-
-# Option for statistical significance tests
-num_runs_for_stats: 1 # Set to >1 to run multiple experiments and compute stats
+# NEW: Toggle for vector trajectory plot
+save_vector_trajectory: True

@@ -1,117 +1,259 @@
 # evaluation/visualize.py
+# Assuming this file exists and contains create_tsne_plot, plot_cosine_similarity_hist, plot_vector_trajectories
+
 import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
+import seaborn as sns
 import numpy as np
 import os
+from sklearn.manifold import TSNE
 import torch
+from PIL import Image
+import shutil # For copying images
+from datetime import datetime # Added for report timestamp
 
-def create_tsne_plot(embeddings, labels, title="t-SNE Plot of Embeddings", save_path=None):
+
+def create_tsne_plot(embeddings, labels, title, save_path):
     """
-    Generates and optionally saves a t-SNE plot of embeddings.
-    
-    Args:
-        embeddings (torch.Tensor): Embeddings to visualize (N, D).
-        labels (torch.Tensor): Corresponding labels (N,).
-        title (str): Title for the plot.
-        save_path (str, optional): Path to save the plot. If None, displays the plot.
+    Generates and saves a t-SNE plot of embeddings.
     """
-    print(f"Generating t-SNE plot for {len(embeddings)} embeddings...")
-    
-    if len(embeddings) > 5000:
-        print("Warning: t-SNE can be slow for large datasets. Consider sampling a subset.")
-        # For demonstration, let's sample if too large
-        sample_indices = np.random.choice(len(embeddings), 5000, replace=False)
-        embeddings_np = embeddings[sample_indices].cpu().numpy()
-        labels_np = labels[sample_indices].cpu().numpy()
+    if embeddings.shape[0] == 0:
+        print(f"Skipping t-SNE plot for '{title}': No embeddings to plot.")
+        return
+
+    # Ensure embeddings are on CPU and convert to numpy
+    embeddings_np = embeddings.cpu().numpy()
+    labels_np = labels.cpu().numpy()
+
+    # Handle labels that might be -1/1, convert to 0/1 for plotting colors
+    unique_labels = np.unique(labels_np)
+    if -1 in unique_labels and 1 in unique_labels:
+        labels_for_plot = np.where(labels_np == 1, 1, 0) # Convert -1 to 0
     else:
-        embeddings_np = embeddings # Line 27
-        labels_np = labels # Line 28
+        labels_for_plot = labels_np
 
-    # Create TSNE model
-    tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
-    # n_jobs=-1 for parallel processing if supported by your sklearn version and numpy setup
-    
-    # Fit and transform
+    n_components = 2 # Always 2 for 2D plot
+    perplexity = min(30, max(1, embeddings_np.shape[0] - 1)) # Perplexity should be less than n_samples
+    if embeddings_np.shape[0] < 5: # t-SNE requires at least 5 samples
+        print(f"Warning: Not enough samples ({embeddings_np.shape[0]}) for t-SNE plot. Skipping.")
+        return
+
+    tsne = TSNE(n_components=n_components, random_state=42, perplexity=perplexity, n_iter=1000)
     try:
         tsne_results = tsne.fit_transform(embeddings_np)
     except Exception as e:
-        print(f"Error during t-SNE computation: {e}")
-        print("Falling back to PCA for dimensionality reduction if t-SNE fails often.")
-        from sklearn.decomposition import PCA
-        pca = PCA(n_components=2)
-        tsne_results = pca.fit_transform(embeddings_np)
-        title = title + " (PCA Fallback)"
+        print(f"Error during t-SNE fitting for '{title}': {e}. Skipping plot.")
+        return
 
-
-    # Plotting
     plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(
-        tsne_results[:, 0], tsne_results[:, 1],
-        c=labels_np,
-        cmap='viridis', # Or 'RdBu' for binary labels
-        alpha=0.7,
-        s=10
-    )
-    plt.colorbar(scatter, ticks=np.unique(labels_np), label='Label')
+    scatter = plt.scatter(tsne_results[:, 0], tsne_results[:, 1], c=labels_for_plot, cmap='viridis', alpha=0.6)
     plt.title(title)
-    plt.xlabel("t-SNE Dimension 1")
-    plt.ylabel("t-SNE Dimension 2")
-    
-    if save_path:
-        print(f"DEBUG (visualize.py): save_path = '{save_path}'") # <--- ADD THIS LINE
-        print(f"DEBUG (visualize.py): os.path.dirname(save_path) = '{os.path.dirname(save_path)}'") # <--- ADD THIS LINE
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path)
-        print(f"t-SNE plot saved to {save_path}")
-    else:
-        plt.show()
-    plt.close() # Close the plot to free memory
+    plt.xlabel('t-SNE Component 1')
+    plt.ylabel('t-SNE Component 2')
+    plt.colorbar(scatter, ticks=unique_labels, label='Label') # Show original labels in colorbar
+    plt.grid(True, linestyle='--', alpha=0.6)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"t-SNE plot saved to {save_path}")
 
-
-def plot_cosine_similarity_hist(similarities, title="Cosine Similarities", save_path=None):
+def plot_cosine_similarity_hist(similarities, title, save_path):
     """
     Plots a histogram of cosine similarities.
-    
-    Args:
-        similarities (torch.Tensor): Tensor of cosine similarities.
-        title (str): Title for the plot.
-        save_path (str, optional): Path to save the plot. If None, displays the plot.
     """
-    print(f"Generating histogram for {len(similarities)} cosine similarities...")
-    
+    if similarities.numel() == 0:
+        print(f"Skipping cosine similarity histogram for '{title}': No similarities to plot.")
+        return
+
     plt.figure(figsize=(8, 6))
-    plt.hist(similarities.cpu().numpy(), bins=50, edgecolor='black', alpha=0.7)
+    sns.histplot(similarities.cpu().numpy(), bins=50, kde=True)
     plt.title(title)
-    plt.xlabel("Cosine Similarity")
-    plt.ylabel("Frequency")
-    plt.grid(axis='y', alpha=0.75)
-
-    if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path)
-        print(f"Cosine similarity histogram saved to {save_path}")
-    else:
-        plt.show()
+    plt.xlabel('Cosine Similarity')
+    plt.ylabel('Frequency')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path)
     plt.close()
+    print(f"Cosine similarity histogram saved to {save_path}")
 
-# Example of how to use this outside the project main flow for testing
-if __name__ == '__main__':
-    # Dummy data for testing
-    num_samples = 1000
-    embed_dim = 512
-    dummy_embeddings = torch.randn(num_samples, embed_dim)
-    dummy_labels = torch.randint(0, 2, (num_samples,)).long()
+def plot_vector_trajectories(original_embeddings, edited_embeddings, labels, direction, save_path, num_samples=50):
+    """
+    Plots trajectories of embeddings before and after editing, showing the direction vector.
+    Project embeddings onto the direction vector for 1D visualization.
+    """
+    if original_embeddings.shape[0] == 0:
+        print(f"Skipping vector trajectory plot: No embeddings to plot.")
+        return
+
+    # Ensure tensors are on CPU and convert to numpy
+    original_embeddings_np = original_embeddings.cpu().numpy()
+    edited_embeddings_np = edited_embeddings.cpu().numpy()
+    labels_np = labels.cpu().numpy()
+    direction_np = direction.cpu().numpy()
+
+    # Normalize direction for projection
+    direction_norm = direction_np / np.linalg.norm(direction_np)
+
+    # Project embeddings onto the direction vector
+    proj_orig = np.dot(original_embeddings_np, direction_norm)
+    proj_edited = np.dot(edited_embeddings_np, direction_norm)
+
+    # Select a subset of samples for clarity
+    if num_samples > original_embeddings_np.shape[0]:
+        num_samples = original_embeddings_np.shape[0]
     
-    # Create some separation for better visualization
-    dummy_embeddings[dummy_labels == 0] -= 1.0
-    dummy_embeddings[dummy_labels == 1] += 1.0
+    # Ensure representative samples, perhaps by picking some positive and some negative
+    pos_indices = np.where(labels_np == 1)[0]
+    neg_indices = np.where(labels_np == -1)[0]
 
-    print("Testing create_tsne_plot...")
-    create_tsne_plot(dummy_embeddings, dummy_labels, title="Test t-SNE Plot", save_path="./temp_outputs/tsne_test.png")
-
-    # Dummy similarities
-    dummy_similarities = torch.rand(num_samples) * 2 - 1 # range from -1 to 1
-    print("\nTesting plot_cosine_similarity_hist...")
-    plot_cosine_similarity_hist(dummy_similarities, title="Test Cosine Similarity Histogram", save_path="./temp_outputs/cosine_hist_test.png")
+    selected_indices = []
+    # Try to get roughly half positive and half negative
+    if len(pos_indices) > 0:
+        selected_indices.extend(np.random.choice(pos_indices, min(len(pos_indices), num_samples // 2), replace=False))
+    if len(neg_indices) > 0:
+        selected_indices.extend(np.random.choice(neg_indices, min(len(neg_indices), num_samples - len(selected_indices)), replace=False))
     
-    print("\nVisualization testing complete. Check './temp_outputs/' for generated plots.")
+    # If not enough positive/negative, just fill with random from all
+    if len(selected_indices) < num_samples:
+        all_indices = np.arange(original_embeddings_np.shape[0])
+        remaining_indices = np.setdiff1d(all_indices, selected_indices)
+        selected_indices.extend(np.random.choice(remaining_indices, num_samples - len(selected_indices), replace=False))
+    
+    selected_indices = np.array(selected_indices)
+
+
+    plt.figure(figsize=(10, 8))
+    
+    # Plot trajectories
+    for i in selected_indices:
+        color = 'blue' if labels_np[i] == -1 else 'red' # Blue for negative, Red for positive
+        plt.plot([proj_orig[i], proj_edited[i]], [0, 1], color=color, alpha=0.6, marker='o', linestyle='-')
+    
+    # Add start and end points
+    plt.scatter(proj_orig[selected_indices], np.zeros_like(proj_orig[selected_indices]), 
+                c=[('red' if l == 1 else 'blue') for l in labels_np[selected_indices]], 
+                label='Original Embeddings', s=100, zorder=5, edgecolor='k')
+    plt.scatter(proj_edited[selected_indices], np.ones_like(proj_edited[selected_indices]), 
+                c=[('red' if l == 1 else 'blue') for l in labels_np[selected_indices]], 
+                label='Edited Embeddings', s=100, zorder=5, edgecolor='k', marker='X')
+
+    plt.yticks([0, 1], ['Original', 'Edited'])
+    plt.xlabel('Projection onto Concept Direction')
+    plt.title('Embedding Trajectories along Concept Direction')
+    
+    # Create custom legend handles to avoid duplicate labels
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    plt.legend(by_label.values(), by_label.keys())
+
+    plt.grid(True, linestyle='--', alpha=0.6)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Vector trajectory plot saved to {save_path}")
+
+
+def visualize_failure_modes(encoder, original_embeddings, edited_embeddings, original_labels, 
+                            original_predictions, edited_predictions, image_ids, output_dir, 
+                            cfg, concept, num_samples_to_save=10):
+    """
+    Identifies and visualizes images where latent surgery causes a failure (e.g., accuracy decrease).
+    Generates a markdown report.
+
+    Args:
+        encoder (EncoderWrapper): The encoder model wrapper.
+        original_embeddings (torch.Tensor): Embeddings before surgery.
+        edited_embeddings (torch.Tensor): Embeddings after surgery.
+        original_labels (torch.Tensor): True labels (-1/1).
+        original_predictions (torch.Tensor): Predictions from original embeddings (0/1).
+        edited_predictions (torch.Tensor): Predictions from edited embeddings (0/1).
+        image_ids (list): List of image IDs (e.g., filenames) corresponding to embeddings.
+        output_dir (str): Base output directory.
+        cfg (dict): The full configuration dictionary, used to find data_root.
+        concept (dict): Dictionary with 'positive' and 'negative' concept descriptions.
+        num_samples_to_save (int): Number of failure examples to save for each category.
+    """
+    print("\n--- Identifying and Visualizing Failure Modes ---")
+    
+    failure_viz_dir = os.path.join(output_dir, 'failure_modes')
+    os.makedirs(failure_viz_dir, exist_ok=True)
+
+    # Convert labels from -1/1 to 0/1 for comparison with predictions
+    labels_01 = (original_labels == 1).int()
+
+    # Define failure categories
+    failures = {
+        "Original_Correct_Surgery_Incorrect": [],
+    }
+
+    # Iterate through each sample to find failures
+    for i in range(len(original_embeddings)):
+        orig_correct = (original_predictions[i] == labels_01[i]).item()
+        edited_correct = (edited_predictions[i] == labels_01[i]).item()
+
+        # Failure type 1: Original correct, but surgery made it incorrect
+        if orig_correct and not edited_correct:
+            failures["Original_Correct_Surgery_Incorrect"].append(i)
+        
+        # NOTE: For "Original_Incorrect_Surgery_Still_Incorrect_But_Worse", it's harder to define "worse" objectively
+        # without a clear metric (e.g., confidence drop, further from decision boundary).
+        # We will focus on "Original Correct, Surgery Incorrect" as it's a clear regression.
+
+    markdown_report_path = os.path.join(output_dir, 'failure_modes_report.md')
+    with open(markdown_report_path, 'w') as f:
+        f.write("# Latent Surgery Failure Modes Report\n\n")
+        f.write(f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"This report highlights examples where latent surgery led to undesired outcomes, primarily focusing on cases where initially correct classifications became incorrect after surgery.\n\n")
+
+        for failure_type, indices in failures.items():
+            f.write(f"## {failure_type.replace('_', ' ')}\n\n")
+            f.write(f"Total instances found: {len(indices)}\n\n")
+
+            samples_to_show = min(num_samples_to_save, len(indices))
+            if samples_to_show == 0:
+                f.write("No examples found for this category.\n\n")
+                continue
+
+            f.write(f"Showing {samples_to_show} examples:\n\n")
+            
+            selected_indices = np.random.choice(indices, samples_to_show, replace=False)
+            
+            for k, idx in enumerate(selected_indices):
+                image_filename = image_ids[idx] # This is typically just the filename, e.g., '000001.jpg'
+                
+                # Reconstruct full image path based on dataset type and config
+                dataset_name = cfg['dataset'].lower()
+                data_root = cfg['data_root']
+                image_full_path = None
+
+                if dataset_name == 'celeba':
+                    image_full_path = os.path.join(data_root, 'img_align_celeba', image_filename)
+                elif dataset_name == 'cub-200':
+                    # CUB's image_ids are usually full paths relative to images_dir (e.g., '001.Black_footed_Albatross/Black_Footed_Albatross_0001_796.jpg')
+                    image_full_path = os.path.join(data_root, 'CUB_200_2011', 'images', image_filename) # Adjusted path for CUB
+                else:
+                    print(f"Warning: Unknown dataset '{dataset_name}'. Cannot determine image path for ID: {image_filename}.")
+
+
+                saved_image_filename = f"{failure_type}_{image_filename.replace('.jpg', '')}_{k}.jpg" 
+                # Ensure saved_image_filename is safe for paths (replace '/' with '_')
+                saved_image_filename = saved_image_filename.replace(os.path.sep, '_')
+                
+                saved_image_path = os.path.join(failure_viz_dir, saved_image_filename)
+                relative_image_path = os.path.join('failure_modes', saved_image_filename) # Path relative to output_dir for markdown
+
+                if image_full_path and os.path.exists(image_full_path):
+                    shutil.copy(image_full_path, saved_image_path)
+                    f.write(f"### Sample {k+1}: Image ID {image_filename}\n\n")
+                    f.write(f"True Label: {original_labels[idx].item()} ({concept['positive'] if original_labels[idx].item() == 1 else concept['negative']})\n")
+                    f.write(f"Original Prediction: {original_predictions[idx].item()} ({'Correct' if original_predictions[idx].item() == labels_01[idx].item() else 'Incorrect'})\n")
+                    f.write(f"Edited Prediction: {edited_predictions[idx].item()} ({'Correct' if edited_predictions[idx].item() == labels_01[idx].item() else 'Incorrect'})\n")
+                    f.write(f"![{image_filename}]({relative_image_path})\n\n")
+                else:
+                    f.write(f"### Sample {k+1}: Image ID {image_filename} (Image not found or not saved)\n\n")
+                    f.write(f"True Label: {original_labels[idx].item()}\n")
+                    f.write(f"Original Prediction: {original_predictions[idx].item()}\n")
+                    f.write(f"Edited Prediction: {edited_predictions[idx].item()}\n\n")
+
+            f.write("---\n\n") # Separator
+    
+    print(f"Failure modes report saved to {markdown_report_path}")

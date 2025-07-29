@@ -1,139 +1,184 @@
 # data/cub_loader.py
+
 import os
 import pandas as pd
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-from data.transforms import get_image_transforms # Assuming transforms.py is in the same 'data' directory
+import torch
+from torch.utils.data import Dataset, DataLoader, random_split
+# Assuming transforms.py is no longer needed as preprocess_fn is passed
+# from data.transforms import get_image_transforms # REMOVE THIS LINE if no longer used
 
 class CUBDataset(Dataset):
-    def __init__(self, root_dir, transform=None, target_classes=None):
+    def __init__(self, root_dir, target_attribute, transform=None):
         """
         Args:
             root_dir (string): Directory with CUB-200-2011 dataset.
-                               Expected structure: root_dir/images/, root_dir/image_class_labels.txt,
-                               root_dir/classes.txt
+                               Expected structure: root_dir/images/, root_dir/attributes/,
+                               root_dir/images.txt, root_dir/image_class_labels.txt,
+                               root_dir/classes.txt, root_dir/train_test_split.txt
+            target_attribute (str): The specific attribute to use for binary classification
+                                    (e.g., "has_bill_shape_conical").
             transform (callable, optional): Optional transform to be applied on an image.
-            target_classes (list, optional): List of class names to filter the dataset (e.g., ['Indigo_Bunting', 'Black_Tern']).
-                                             If None, loads all classes.
         """
         self.root_dir = root_dir
         self.img_dir = os.path.join(root_dir, 'images')
-        self.images_file = os.path.join(root_dir, 'images.txt')
-        self.class_labels_file = os.path.join(root_dir, 'image_class_labels.txt')
-        self.classes_file = os.path.join(root_dir, 'classes.txt')
         self.transform = transform
+        self.target_attribute = target_attribute
 
-        if not all(os.path.exists(f) for f in [self.images_file, self.class_labels_file, self.classes_file]):
-            raise FileNotFoundError(f"One or more required CUB files not found in {root_dir}. "
-                                    "Please ensure 'images.txt', 'image_class_labels.txt', and 'classes.txt' exist.")
+        # Load necessary CUB metadata files
+        self.images_df = pd.read_csv(os.path.join(root_dir, 'images.txt'), sep=' ', names=['image_id', 'image_name'])
+        self.train_test_split_df = pd.read_csv(os.path.join(root_dir, 'train_test_split.txt'), sep=' ', names=['image_id', 'is_training_img'])
+        
+        # Load attribute names and image attribute labels
+        self.attributes_df = pd.read_csv(os.path.join(root_dir, 'attributes', 'attributes.txt'), sep=' ', names=['attribute_id', 'attribute_name'])
+        self.image_attributes_df = pd.read_csv(os.path.join(root_dir, 'attributes', 'image_attribute_labels.txt'), sep=' ', names=['image_id', 'attribute_id', 'attribute_value', 'confidence_level', 'time'])
 
-        self.images_df = pd.read_csv(self.images_file, sep=' ', names=['image_id', 'image_name'])
-        self.labels_df = pd.read_csv(self.class_labels_file, sep=' ', names=['image_id', 'class_id'])
-        self.classes_df = pd.read_csv(self.classes_file, sep=' ', names=['class_id', 'class_name'])
-
-        # Merge dataframes to get image names and class names
-        self.data = pd.merge(self.images_df, self.labels_df, on='image_id')
-        self.data = pd.merge(self.data, self.classes_df, on='class_id')
-
-        self.data_filtered = self.data.copy()
-        if target_classes:
-            self.data_filtered = self.data_filtered[self.data_filtered['class_name'].isin(target_classes)]
-            if self.data_filtered.empty:
-                raise ValueError(f"No images found for target classes: {target_classes}. Check class names.")
-            # Map class names to integer labels for training
-            unique_classes = sorted(self.data_filtered['class_name'].unique())
-            self.class_to_idx = {name: idx for idx, name in enumerate(unique_classes)}
-            self.data_filtered['label'] = self.data_filtered['class_name'].map(self.class_to_idx)
-        else:
-            print("Warning: No target classes provided for filtering CUB. Loading all classes with original class_id as label.")
-            self.data_filtered['label'] = self.data_filtered['class_id'] - 1 # Adjust to 0-indexed if needed
+        # Merge dataframes to get image names and attribute values
+        self.data = pd.merge(self.images_df, self.image_attributes_df, on='image_id')
+        self.data = pd.merge(self.data, self.attributes_df, on='attribute_id')
+        
+        # Filter for the target attribute
+        self.data_filtered = self.data[self.data['attribute_name'] == self.target_attribute].copy()
 
         if self.data_filtered.empty:
-            raise ValueError("No data found after filtering. Check target classes or dataset integrity.")
+            raise ValueError(f"Target attribute '{self.target_attribute}' not found or no images for it. "
+                             "Please check attribute name in attributes.txt or data integrity.")
+
+        # Map attribute_value (1 for present, 0 for absent/not mentioned) to -1/1 labels
+        # The CUB attributes are typically 1 (present) or 0 (absent/not applicable).
+        # We need to map 1 -> 1 (positive concept) and 0 -> -1 (negative concept)
+        self.data_filtered['label'] = self.data_filtered['attribute_value'].apply(lambda x: 1 if x == 1 else -1)
+
+        # Get unique image IDs and their corresponding labels for the target attribute
+        # If an image has multiple entries for the same attribute (e.g., different confidences), take the first.
+        self.data_filtered = self.data_filtered.drop_duplicates(subset=['image_id', 'attribute_name'])
+        
+        # Ensure image_id is the index for easy lookup
+        self.data_filtered = self.data_filtered.set_index('image_id')
+
+        self.image_ids = self.data_filtered.index.tolist()
+        self.labels = self.data_filtered['label'].loc[self.image_ids].values
+
+        # Debugging the labels to ensure they contain -1s and 1s
+        unique_labels = pd.Series(self.labels).unique()
+        print(f"DEBUG (CUBDataset): Unique labels for '{self.target_attribute}': {unique_labels}")
+        if not (-1 in unique_labels and 1 in unique_labels):
+            print(f"WARNING: Labels for '{self.target_attribute}' do not contain both 1 and -1. "
+                  "This might affect direction finding for binary attributes.")
+        
+        if self.data_filtered.empty:
+            raise ValueError("No data found after filtering for target attribute. Check attribute name or dataset integrity.")
 
     def __len__(self):
-        return len(self.data_filtered)
+        return len(self.image_ids)
 
     def __getitem__(self, idx):
-        img_info = self.data_filtered.iloc[idx]
-        img_name = os.path.join(self.img_dir, img_info['image_name'])
-        image = Image.open(img_name).convert('RGB')
-        label = img_info['label']
+        img_id = self.image_ids[idx]
+        img_name_full_path = self.images_df[self.images_df['image_id'] == img_id]['image_name'].iloc[0]
+        img_path = os.path.join(self.img_dir, img_name_full_path)
+        
+        image = Image.open(img_path).convert('RGB')
+        label = int(self.labels[idx]) # Ensure label is an integer (1 or -1)
 
         if self.transform:
             image = self.transform(image)
 
-        return image, label, img_info['image_name']
+        return image, label, img_name_full_path # Return full image name for consistency
 
-
-def get_cub_dataloaders(cfg):
+def get_cub_dataloaders(cfg, preprocess_fn): # Added preprocess_fn argument
     """
     Returns train and test dataloaders for CUB-200.
     """
-    transform = get_image_transforms()
-    
-    # CUB doesn't have explicit positive/negative concepts like CelebA attributes.
-    # For latent surgery, we might define concepts based on specific bird species
-    # or visual attributes (if available in a separate annotation).
-    # For now, we'll load specific classes if 'concept' is a list in config.
-    target_classes = cfg['concept'].get('cub_classes') if 'cub_classes' in cfg['concept'] else None
+    # The 'concept' in config.yaml for CUB should now specify the target attribute.
+    # Example: concept: { positive: "has_bill_shape_conical" }
+    target_attribute = cfg['concept']['positive'] # Assuming positive concept is the target attribute name
 
     full_dataset = CUBDataset(
         root_dir=cfg['cub_root_dir'],
-        transform=transform,
-        target_classes=target_classes
+        target_attribute=target_attribute,
+        transform=preprocess_fn # Pass the encoder's preprocess_fn
     )
 
-    train_size = int(0.8 * len(full_dataset))
-    test_size = len(full_dataset) - train_size
+    # Use a custom collate_fn to handle batching of preprocessed images
+    def custom_collate_fn(batch):
+        images = torch.cat([item[0] for item in batch], dim=0)
+        labels = torch.tensor([item[1] for item in batch])
+        img_ids = [item[2] for item in batch]
+        return images, labels, img_ids
+
+    # Use the train_test_split.txt file to create train and test splits
+    split_df = pd.read_csv(os.path.join(cfg['cub_root_dir'], 'train_test_split.txt'), sep=' ', names=['image_id', 'is_training_img'])
     
-    from torch.utils.data import random_split
-    train_dataset, test_dataset = random_split(full_dataset, [train_size, test_size])
+    # Filter image IDs based on the target attribute and then apply train/test split
+    # Ensure only images relevant to the target attribute are considered for splitting
+    relevant_image_ids = full_dataset.data_filtered.index.tolist()
+    split_df_relevant = split_df[split_df['image_id'].isin(relevant_image_ids)]
+
+    train_image_ids = split_df_relevant[split_df_relevant['is_training_img'] == 1]['image_id'].tolist()
+    test_image_ids = split_df_relevant[split_df_relevant['is_training_img'] == 0]['image_id'].tolist()
+
+    # Create datasets for train and test splits using Subset
+    from torch.utils.data import Subset
+    train_indices = [full_dataset.image_ids.index(img_id) for img_id in train_image_ids if img_id in full_dataset.image_ids]
+    test_indices = [full_dataset.image_ids.index(img_id) for img_id in test_image_ids if img_id in full_dataset.image_ids]
+
+    train_dataset = Subset(full_dataset, train_indices)
+    test_dataset = Subset(full_dataset, test_indices)
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg['batch_size'],
         shuffle=True,
-        num_workers=os.cpu_count() // 2 or 1
+        num_workers=os.cpu_count() // 2 or 1,
+        collate_fn=custom_collate_fn # Use custom collate function
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=cfg['batch_size'],
         shuffle=False,
-        num_workers=os.cpu_count() // 2 or 1
+        num_workers=os.cpu_count() // 2 or 1,
+        collate_fn=custom_collate_fn # Use custom collate function
     )
     
-    print(f"CUB-200: Loaded {len(full_dataset)} images. Train: {len(train_dataset)}, Test: {len(test_dataset)}")
+    print(f"CUB-200: Loaded {len(full_dataset)} images for attribute '{target_attribute}'.")
+    print(f"Train: {len(train_dataset)} images, Test: {len(test_dataset)} images.")
+    print(f"Train loader has {len(train_loader)} batches.")
+    print(f"Test loader has {len(test_loader)} batches.")
     return train_loader, test_loader
 
 # Example of how to use this outside the project main flow for testing
 if __name__ == '__main__':
     from utils.config_loader import load_config
+    from models.encoder_wrapper import EncoderWrapper # For mock preprocess_fn
+
+    # Mock preprocess_fn for testing
+    class MockPreprocessFn:
+        def __call__(self, images):
+            # Simulate CLIP preprocessing: adds batch dim, converts to float32
+            if isinstance(images, list): # Handle batch of PIL images
+                return torch.stack([torch.randn(3, 224, 224) for _ in images])
+            return torch.randn(1, 3, 224, 224) # Single image
+
     try:
-        # Example config for CUB:
-        # dataset: CUB-200
-        # concept:
-        #   cub_classes: ["Indigo_Bunting", "Black_Tern"]
-        # cub_root_dir: "/path/to/CUB_200_2011"
         cfg = load_config("../config.yaml") 
         cfg['dataset'] = 'CUB-200' # Temporarily set for testing
-        # Ensure your config.yaml has a 'cub_classes' key under 'concept' for filtering or remove it to load all
-        cfg['concept']['cub_classes'] = ["Indigo_Bunting", "Black_Tern", "Tree_Sparrow"] 
-        # Make sure cub_root_dir points to your CUB dataset
-        cfg['cub_root_dir'] = "/content/drive/MyDrive/Paper2/CUB_200_2011" # Dummy path, replace with your actual path
+        
+        # IMPORTANT: You must ensure this attribute exists in CUB's attributes.txt
+        # and has both 0 and 1 values in image_attribute_labels.txt
+        cfg['concept']['positive'] = "has_bill_shape_conical" # Example CUB attribute
+        cfg['concept']['negative'] = "not_has_bill_shape_conical" # Placeholder for consistency, actual filtering uses -1
 
-        if cfg['dataset'] == 'CUB-200':
-            print(f"Attempting to load CUB-200 from: {cfg['cub_root_dir']}")
-            train_loader, test_loader = get_cub_dataloaders(cfg)
-            print(f"Train loader has {len(train_loader)} batches.")
-            print(f"Test loader has {len(test_loader)} batches.")
-            
-            for i, (images, labels, img_names) in enumerate(train_loader):
-                print(f"Batch {i+1}: Images shape: {images.shape}, Labels shape: {labels.shape}")
-                print(f"Sample labels: {labels[:5]}")
-                print(f"Sample image names: {img_names[:5]}")
-                break
-        else:
-            print("CUB-200 loader test skipped as 'dataset' in config is not 'CUB-200'.")
+        # Make sure cub_root_dir points to your CUB dataset
+        # This path must contain 'images', 'attributes', 'images.txt', 'train_test_split.txt', etc.
+        cfg['cub_root_dir'] = "/content/data/cub" # Adjust to your actual path
+
+        print(f"Attempting to load CUB-200 from: {cfg['cub_root_dir']}")
+        train_loader, test_loader = get_cub_dataloaders(cfg, MockPreprocessFn())
+        
+        for i, (images, labels, img_names) in enumerate(train_loader):
+            print(f"Batch {i+1}: Images shape: {images.shape}, Labels shape: {labels.shape}")
+            print(f"Sample labels: {labels[:5]}")
+            print(f"Sample image names: {img_names[:5]}")
+            break
     except Exception as e:
         print(f"Error during CUB loader test: {e}")

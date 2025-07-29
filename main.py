@@ -5,31 +5,59 @@ import torch
 import yaml
 import pandas as pd
 from datetime import datetime
+from scipy import stats # For statistical tests
+import random # For geometric analysis random vector
+import shutil # For copying images for failure visualization
 
-# Corrected: Import EncoderWrapper
-from models.encoder_wrapper import EncoderWrapper # Changed from CLIPModelWrapper
-
+from models.encoder_wrapper import EncoderWrapper
+# Import all potential dataset loaders. You must ensure these files exist and have get_dataloaders
 from data.celeba_loader import get_celeba_dataloaders
-from surgery.direction_finder import compute_direction
-from surgery.edit_embedding import apply_surgery
+from data.cub_loader import get_cub_dataloaders 
+# from data.imagenet_loader import get_imagenet_dataloaders 
+
+# NEW IMPORTS FOR NEW FEATURES
+import analysis.geometry # For geometric insights
 from evaluation.metrics import (
     calculate_accuracy,
     calculate_cosine_similarity,
     calculate_mean_confidence,
-    # evaluate_probe_accuracy, # COMMENTED OUT: Function not found in evaluation/metrics.py
-    # evaluate_retrieval,      # COMMENTED OUT: Function not found in evaluation/metrics.py
-    # Potentially new geometric analysis functions will go here
-    # Potentially new statistical significance functions will go here
+    evaluate_probe_accuracy,
+    evaluate_retrieval,
+    perform_statistical_test,
+    perform_paired_statistical_test, # NEW: Paired t-test
+    get_model_predictions, # NEW: Get per-sample predictions
 )
 from evaluation.visualize import (
-    create_tsne_plot, plot_cosine_similarity_hist,
-    # Potentially new failure mode visualization functions will go here
+    create_tsne_plot,
+    plot_cosine_similarity_hist,
+    plot_vector_trajectories,
+    visualize_failure_modes, # NEW: Failure mode visualization
 )
 # Import baselines
 from baselines.prompt_tuning import prompt_tuning_baseline
 from baselines.random_edit import random_edit_baseline
-from baselines.linear_probe import run_linear_probe_baseline
 from baselines.splice_baseline import run_splice_baseline
+
+
+def get_dataset_dataloaders(cfg, preprocess_fn):
+    """
+    Dynamically loads the correct dataset dataloaders and datasets based on config.
+    Returns: (train_loader, test_loader, train_dataset, test_dataset)
+    """
+    dataset_name = cfg['dataset'].lower()
+    if dataset_name == 'celeba':
+        # get_celeba_dataloaders should be updated to return train_dataset, test_dataset
+        train_loader, test_loader, train_dataset, test_dataset = get_celeba_dataloaders(cfg, preprocess_fn)
+        return train_loader, test_loader, train_dataset, test_dataset
+    elif dataset_name == 'cub-200': 
+        # get_cub_dataloaders should be updated to return train_dataset, test_dataset
+        train_loader, test_loader, train_dataset, test_dataset = get_cub_dataloaders(cfg, preprocess_fn)
+        return train_loader, test_loader, train_dataset, test_dataset
+    # elif dataset_name == 'imagenet': 
+    #     # If imagenet is implemented, it should also return the datasets
+    #     return get_imagenet_dataloaders(cfg, preprocess_fn)
+    else:
+        raise ValueError(f"Unknown dataset: {cfg['dataset']}. Check config.yaml and data loaders.")
 
 
 def main():
@@ -40,7 +68,7 @@ def main():
     print("Configuration loaded from config.yaml")
     print("Configuration loaded:")
     for key, value in cfg.items():
-        print(f"  {key}: {value}")
+        print(f"    {key}: {value}")
 
     # Set device
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -68,8 +96,9 @@ def main():
 
     for run_idx in range(num_runs):
         print(f"\n--- Starting Run {run_idx + 1}/{num_runs} ---")
-        # Ensure reproducibility for each run
-        torch.manual_seed(run_idx) # Use run_idx as seed for different runs
+        # Ensure reproducibility for each run (optional, for different random seeds per run)
+        # torch.manual_seed(run_idx) 
+        # np.random.seed(run_idx) # If using numpy random functions
 
         # --- Phase 1: Model Setup & Data Loading ---
         print("\n--- Phase 1: Model Setup & Data Loading ---")
@@ -77,16 +106,15 @@ def main():
         # Current model name for this specific run (will be consistent if no changes within runs)
         current_model_name = model_to_use_for_experiment
         
-        # Corrected: Instantiate EncoderWrapper
-        encoder = EncoderWrapper(current_model_name, device) # Changed from clip
+        # Instantiate EncoderWrapper
+        encoder = EncoderWrapper(current_model_name, device)
         
-        # Data loaders (assuming CelebA for now)
-        # Corrected: Pass encoder.preprocess_image
-        train_loader, test_loader = get_celeba_dataloaders(cfg, encoder.preprocess_image)
+        # Data loaders (dynamically load based on config)
+        # Ensure get_dataset_dataloaders returns train_dataset and test_dataset
+        train_loader, test_loader, train_dataset, test_dataset = get_dataset_dataloaders(cfg, encoder.preprocess_image) 
         
         # Get embeddings and labels for the test set
         print("\nGetting test set embeddings...")
-        # Corrected: Call encoder.get_latents
         test_embeddings_orig_for_ls, test_labels_for_ls, test_img_ids_for_ls = encoder.get_latents(test_loader)
         
         print(f"Original test embeddings shape: {test_embeddings_orig_for_ls.shape}")
@@ -99,14 +127,12 @@ def main():
         print("\n--- Phase 2: Latent Surgery Implementation ---")
 
         # Compute semantic direction
-        # Corrected: Pass encoder
         direction = compute_direction(encoder, train_loader, cfg)
         
         # Apply latent surgery to test embeddings
         print(f"Applying latent surgery with alpha={cfg['surgery_alpha']}...")
-        # Corrected: Call apply_surgery and use its multiple returns
         test_embeddings_edited_ls, _, _, _ = apply_surgery(
-            encoder, test_loader, direction, cfg['surgery_alpha'] # pass test_loader to apply_surgery
+            encoder, test_loader, direction, cfg['surgery_alpha']
         )
         
         print("Latent surgery applied.")
@@ -119,23 +145,32 @@ def main():
 
         run_results = {
             'Run_Index': run_idx + 1,
-            'Model_Name': current_model_name, # This will now reflect the actual model loaded
+            'Model_Name': current_model_name,
             'Concept_Positive': cfg['concept']['positive'],
             'Concept_Negative': cfg['concept']['negative'],
             'Surgery_Alpha': cfg['surgery_alpha']
         }
 
-        # Evaluate Latent Surgery
-        print("\nEvaluating Latent Surgery:")
-        # Latent Surgery uses prompt baseline for evaluation of concept change
+        # Get per-sample predictions for failure analysis
+        print("\nGetting per-sample predictions for original embeddings...")
+        orig_predictions, orig_confidences = get_model_predictions(
+            encoder, test_embeddings_orig_for_ls, cfg['concept'], device
+        )
+        print("Getting per-sample predictions for edited embeddings...")
+        edited_predictions, edited_confidences = get_model_predictions(
+            encoder, test_embeddings_edited_ls, cfg['concept'], device
+        )
+
+
+        # Evaluate Latent Surgery (using prompt tuning)
+        print("\nEvaluating Latent Surgery (Prompt Tuning Classifier):")
         ls_prompt_accuracy, ls_pos_conf, ls_neg_conf = prompt_tuning_baseline(
-            encoder, test_embeddings_edited_ls, test_labels_for_ls, cfg['concept'], device # Corrected: Pass encoder
+            encoder, test_embeddings_edited_ls, test_labels_for_ls, cfg['concept'], device
         )
         run_results['Latent_Surgery_Prompt_Accuracy'] = ls_prompt_accuracy
         run_results['Latent_Surgery_Prompt_Pos_Conf'] = ls_pos_conf
         run_results['Latent_Surgery_Prompt_Neg_Conf'] = ls_neg_conf
         
-        # Corrected: Call calculate_cosine_similarity
         ls_cosine_sim_change = calculate_cosine_similarity(test_embeddings_orig_for_ls, test_embeddings_edited_ls).mean().item()
         run_results['Latent_Surgery_Cosine_Sim_Change'] = ls_cosine_sim_change
         print(f"Calculated average cosine similarity (Latent Surgery): {ls_cosine_sim_change:.4f}")
@@ -144,7 +179,7 @@ def main():
         if cfg.get('run_prompt_baseline', True):
             print("\nRunning Prompt Tuning Baseline for Original Embeddings...")
             pt_accuracy, pt_pos_conf, pt_neg_conf = prompt_tuning_baseline(
-                encoder, test_embeddings_orig_for_ls, test_labels_for_ls, cfg['concept'], device # Corrected: Pass encoder
+                encoder, test_embeddings_orig_for_ls, test_labels_for_ls, cfg['concept'], device
             )
             run_results['Original_Prompt_Accuracy'] = pt_accuracy
             run_results['Original_Prompt_Pos_Conf'] = pt_pos_conf
@@ -157,96 +192,189 @@ def main():
             random_edited_embeddings = random_edit_baseline(test_embeddings_orig_for_ls, cfg['surgery_alpha'])
             
             re_prompt_accuracy, re_pos_conf, re_neg_conf = prompt_tuning_baseline(
-                encoder, random_edited_embeddings, test_labels_for_ls, cfg['concept'], device # Corrected: Pass encoder
+                encoder, random_edited_embeddings, test_labels_for_ls, cfg['concept'], device
             )
             run_results['Random_Edit_Prompt_Accuracy'] = re_prompt_accuracy
             run_results['Random_Edit_Prompt_Pos_Conf'] = re_pos_conf
             run_results['Random_Edit_Prompt_Neg_Conf'] = re_neg_conf
 
-            # Corrected: Call calculate_cosine_similarity
             re_cosine_sim_change = calculate_cosine_similarity(test_embeddings_orig_for_ls, random_edited_embeddings).mean().item()
             run_results['Random_Edit_Cosine_Sim_Change'] = re_cosine_sim_change
             print(f"Calculated average cosine similarity (Random Edit): {re_cosine_sim_change:.4f}")
             print("Random Edit Baseline complete.")
 
-        # --- Run SpLiCE Baseline ---
+        # Run SpLiCE Baseline
         if cfg.get('run_splice_baseline', False):
             print("\n--- Running SpLiCE Baseline ---")
-            # This function is now implemented in baselines/splice_baseline.py with targeted editing logic.
             splice_edited_embeddings = run_splice_baseline(
-                encoder, test_embeddings_orig_for_ls, train_loader, cfg, device # Corrected: Pass encoder
+                encoder, test_embeddings_orig_for_ls, train_loader, cfg, device
             )
             print("SpLiCE Baseline complete.")
             
-            # Evaluate SpLiCE similar to latent surgery
             splice_prompt_accuracy, splice_pos_conf, splice_neg_conf = prompt_tuning_baseline(
-                encoder, splice_edited_embeddings, test_labels_for_ls, cfg['concept'], device # Corrected: Pass encoder
+                encoder, splice_edited_embeddings, test_labels_for_ls, cfg['concept'], device
             )
             run_results['SpLiCE_Prompt_Accuracy'] = splice_prompt_accuracy
             run_results['SpLiCE_Prompt_Pos_Conf'] = splice_pos_conf
             run_results['SpLiCE_Prompt_Neg_Conf'] = splice_neg_conf
 
-            # Corrected: Call calculate_cosine_similarity
             splice_cosine_sim_change = calculate_cosine_similarity(test_embeddings_orig_for_ls, splice_edited_embeddings).mean().item()
             run_results['SpLiCE_Cosine_Sim_Change'] = splice_cosine_sim_change
             print(f"Calculated average cosine similarity (SpLiCE): {splice_cosine_sim_change:.4f}")
 
-        # Run Linear Probe Baseline (Original and Edited)
-        # COMMENTED OUT: Functions evaluate_probe_accuracy and evaluate_retrieval are missing.
+        # Run Linear Probe Baseline (Original Embeddings)
         if cfg.get('run_linear_probe_baseline', True):
-            print("\n--- Skipping Linear Probe Baseline - 'evaluate_probe_accuracy' function is missing ---")
+            print("\n--- Running Linear Probe Baseline ---")
+            lp_orig_accuracy, lp_orig_f1 = evaluate_probe_accuracy(
+                test_embeddings_orig_for_ls, 
+                test_labels_for_ls, 
+                os.path.join(output_dir, f'linear_probe_baseline_results_run{run_idx}.json') # Unique name per run
+            )
+            run_results['Linear_Probe_Original_Accuracy'] = lp_orig_accuracy
+            run_results['Linear_Probe_Original_F1'] = lp_orig_f1
+            print("Linear Probe Baseline complete.")
+
+        # Run Latent Probe (Edited Embeddings)
         if cfg.get('run_latent_probe', True):
-            print("\n--- Skipping Latent Probe - 'evaluate_probe_accuracy' function is missing ---")
+            print("\n--- Running Latent Probe ---")
+            lp_edited_accuracy, lp_edited_f1 = evaluate_probe_accuracy(
+                test_embeddings_edited_ls, 
+                test_labels_for_ls,
+                os.path.join(output_dir, f'latent_probe_edited_results_run{run_idx}.json') # Unique name per run
+            )
+            run_results['Latent_Probe_Edited_Accuracy'] = lp_edited_accuracy
+            run_results['Latent_Probe_Edited_F1'] = lp_edited_f1
+            print("Latent Probe complete.")
 
         # Run Retrieval Evaluation
-        # COMMENTED OUT: Functions evaluate_probe_accuracy and evaluate_retrieval are missing.
         if cfg.get('run_retrieval_eval', True):
-            print("\n--- Skipping Retrieval Evaluation - 'evaluate_retrieval' function is missing ---")
+            print("\n--- Running Retrieval Evaluation ---")
+            # For Original Embeddings
+            print("Evaluating retrieval for Original Embeddings:")
+            retrieval_orig_mAP, retrieval_orig_topK_acc = evaluate_retrieval(
+                test_embeddings_orig_for_ls, test_labels_for_ls, test_img_ids_for_ls, 
+                test_embeddings_orig_for_ls, test_labels_for_ls, test_img_ids_for_ls, # Use test set as gallery
+                cfg['retrieval_top_k'],
+                os.path.join(output_dir, f'retrieval_original_results_run{run_idx}.json')
+            )
+            run_results['Retrieval_mAP_Original'] = retrieval_orig_mAP
+            run_results[f'Retrieval_Top{cfg["retrieval_top_k"]}_Accuracy_Original'] = retrieval_orig_topK_acc
+
+            # For Edited Embeddings
+            print("Evaluating retrieval for Edited Embeddings:")
+            retrieval_edited_mAP, retrieval_edited_topK_acc = evaluate_retrieval(
+                test_embeddings_edited_ls, test_labels_for_ls, test_img_ids_for_ls,
+                test_embeddings_edited_ls, test_labels_for_ls, test_img_ids_for_ls, # Use edited set as gallery
+                cfg['retrieval_top_k'],
+                os.path.join(output_dir, f'retrieval_edited_results_run{run_idx}.json')
+            )
+            run_results['Retrieval_mAP_Edited'] = retrieval_edited_mAP
+            run_results[f'Retrieval_Top{cfg["retrieval_top_k"]}_Accuracy_Edited'] = retrieval_edited_topK_acc
+            print("Retrieval Evaluation complete.")
 
         # --- Geometric / Theoretical Analysis ---
         if cfg.get('enable_geometric_analysis', False):
             print("\n--- Performing Geometric / Theoretical Analysis ---")
-            print("Geometric analysis placeholder active. Implement specific analysis functions.")
+            # Analyze properties of the learned direction vector
+            direction_properties = analysis.geometry.calculate_vector_properties(direction, "Concept_Direction")
+            run_results.update(direction_properties)
+
+            # Compare concept direction with a random vector
+            random_direction = torch.randn_like(direction)
+            random_direction_comparison = analysis.geometry.compare_vectors_geometry(
+                direction, random_direction, "Concept_Direction", "Random_Direction"
+            )
+            run_results.update(random_direction_comparison)
+
+            # Plot distribution of components of the direction vector
+            analysis.geometry.plot_vector_component_distribution(
+                direction, "Concept_Direction", 
+                os.path.join(output_dir, f'geometric_analysis_direction_distribution_run{run_idx}.png')
+            )
+
+            # Placeholder for future multiple concept direction comparison:
+            # If you have multiple concept directions (e.g., from different runs/definitions),
+            # you can collect them and use plot_pairwise_similarity_heatmap.
+            # E.g., concept_directions = [direction_concept1, direction_concept2]
+            # similarity_matrix = ... # compute pairwise similarities
+            # analysis.geometry.plot_pairwise_similarity_heatmap(similarity_matrix, ['Concept1', 'Concept2'], "Concept Direction Similarities", ...)
+            
+            print("Geometric Analysis complete.")
 
         # --- Failure Mode Visualization ---
         if cfg.get('enable_failure_mode_viz', False):
             print("\n--- Preparing Failure Mode Visualizations ---")
-            print("Failure mode visualization placeholder active. Implement 'visualize_failure_modes'.")
+            visualize_failure_modes(
+                encoder, 
+                test_embeddings_orig_for_ls, 
+                test_embeddings_edited_ls, 
+                test_labels_for_ls, 
+                orig_predictions, 
+                edited_predictions, 
+                test_img_ids_for_ls, 
+                output_dir,
+                cfg, # Pass full config for data_root access to reconstruct image paths
+                cfg['concept'],
+                num_samples_to_save=cfg.get('num_failure_viz_samples', 10)
+            )
+            print("Failure Mode Visualizations complete.")
+
 
         # --- Visualizations ---
-        print(f"\nGenerating t-SNE plot for {len(test_embeddings_orig_for_ls)} embeddings...")
-        create_tsne_plot(test_embeddings_orig_for_ls, test_labels_for_ls, "t-SNE of Original Embeddings", os.path.join(output_dir, 'tsne_original.png'))
+        if cfg.get('save_tsne', True):
+            print(f"\nGenerating t-SNE plot for {len(test_embeddings_orig_for_ls)} embeddings (Original)...")
+            create_tsne_plot(test_embeddings_orig_for_ls, test_labels_for_ls, "t-SNE of Original Embeddings", os.path.join(output_dir, f'tsne_original_run{run_idx}.png'))
 
-        print(f"Generating t-SNE plot for {len(test_embeddings_edited_ls)} embeddings...")
-        create_tsne_plot(test_embeddings_edited_ls, test_labels_for_ls, "t-SNE of Latent Surgery Edited Embeddings", os.path.join(output_dir, 'tsne_latent_surgery.png'))
+            print(f"Generating t-SNE plot for {len(test_embeddings_edited_ls)} embeddings (Latent Surgery)...")
+            create_tsne_plot(test_embeddings_edited_ls, test_labels_for_ls, "t-SNE of Latent Surgery Edited Embeddings", os.path.join(output_dir, f'tsne_latent_surgery_run{run_idx}.png'))
 
-        if cfg.get('run_random_edit_baseline', True):
-            print(f"Generating t-SNE plot for {len(random_edited_embeddings)} embeddings...")
-            create_tsne_plot(random_edited_embeddings, test_labels_for_ls, "t-SNE of Random Edit Embeddings", os.path.join(output_dir, 'tsne_random_edit.png'))
-        
+            if cfg.get('run_random_edit_baseline', True):
+                if 'random_edited_embeddings' in locals():
+                    print(f"Generating t-SNE plot for {len(random_edited_embeddings)} embeddings (Random Edit)...")
+                    create_tsne_plot(random_edited_embeddings, test_labels_for_ls, "t-SNE of Random Edit Embeddings", os.path.join(output_dir, f'tsne_random_edit_run{run_idx}.png'))
+            
+            if cfg.get('run_splice_baseline', False):
+                if 'splice_edited_embeddings' in locals():
+                    print(f"Generating t-SNE plot for {len(splice_edited_embeddings)} embeddings (SpLiCE)...")
+                    create_tsne_plot(splice_edited_embeddings, test_labels_for_ls, "t-SNE of SpLiCE Edited Embeddings", os.path.join(output_dir, f'tsne_splice_run{run_idx}.png'))
+            
+            # Generate vector trajectory plot
+            if cfg.get('save_vector_trajectory', True):
+                print(f"Generating vector trajectory plot for {len(test_embeddings_orig_for_ls)} embeddings...")
+                plot_vector_trajectories(
+                    test_embeddings_orig_for_ls, 
+                    test_embeddings_edited_ls, 
+                    test_labels_for_ls, 
+                    direction, # Pass the direction vector
+                    os.path.join(output_dir, f'vector_trajectory_run{run_idx}.png'),
+                    num_samples=cfg.get('num_trajectory_samples', 50) # Plot trajectories for a subset of samples for clarity
+                )
+
         # Plot cosine similarity change histograms
-        print(f"Generating histogram for {len(test_embeddings_orig_for_ls)} cosine similarities (Latent Surgery)...")
+        print(f"Generating histogram for cosine similarities (Latent Surgery)...")
         plot_cosine_similarity_hist(
             calculate_cosine_similarity(test_embeddings_orig_for_ls, test_embeddings_edited_ls), 
             "Cosine Similarity Change (Latent Surgery)", 
-            os.path.join(output_dir, 'cosine_similarity_surgery_hist.png')
+            os.path.join(output_dir, f'cosine_similarity_surgery_hist_run{run_idx}.png')
         )
         
         if cfg.get('run_random_edit_baseline', True):
-            print(f"Generating histogram for {len(random_edited_embeddings)} cosine similarities (Random Edit)...")
-            plot_cosine_similarity_hist(
-                calculate_cosine_similarity(test_embeddings_orig_for_ls, random_edited_embeddings), 
-                "Cosine Similarity Change (Random Edit)", 
-                os.path.join(output_dir, 'cosine_similarity_random_hist.png')
-            )
+            if 'random_edited_embeddings' in locals():
+                print(f"Generating histogram for cosine similarities (Random Edit)...")
+                plot_cosine_similarity_hist(
+                    calculate_cosine_similarity(test_embeddings_orig_for_ls, random_edited_embeddings), 
+                    "Cosine Similarity Change (Random Edit)", 
+                    os.path.join(output_dir, f'cosine_similarity_random_hist_run{run_idx}.png')
+                )
         
         if cfg.get('run_splice_baseline', False):
-            print(f"Generating histogram for {len(splice_edited_embeddings)} cosine similarities (SpLiCE)...")
-            plot_cosine_similarity_hist(
-                calculate_cosine_similarity(test_embeddings_orig_for_ls, splice_edited_embeddings), 
-                "Cosine Similarity Change (SpLiCE)", 
-                os.path.join(output_dir, 'cosine_similarity_splice_hist.png')
-            )
+            if 'splice_edited_embeddings' in locals():
+                print(f"Generating histogram for cosine similarities (SpLiCE)...")
+                plot_cosine_similarity_hist(
+                    calculate_cosine_similarity(test_embeddings_orig_for_ls, splice_edited_embeddings), 
+                    "Cosine Similarity Change (SpLiCE)", 
+                    os.path.join(output_dir, f'cosine_similarity_splice_hist_run{run_idx}.png')
+                )
 
         all_results.append(run_results)
         print(f"\n--- Run {run_idx + 1}/{num_runs} Complete ---")
@@ -256,10 +384,40 @@ def main():
     if num_runs > 1:
         print("\n--- Computing Statistical Significance ---")
         results_df_multi_run = pd.DataFrame(all_results)
-        print("Statistical significance calculation placeholder active. Implement specific tests.")
+        
+        # Example: Compare Latent Surgery vs. Original Prompt Accuracy (Paired)
+        if 'Latent_Surgery_Prompt_Accuracy' in results_df_multi_run.columns and \
+           'Original_Prompt_Accuracy' in results_df_multi_run.columns:
+            
+            ls_accs = results_df_multi_run['Latent_Surgery_Prompt_Accuracy'].tolist()
+            orig_accs = results_df_multi_run['Original_Prompt_Accuracy'].tolist()
+            
+            print("\nComparing Latent Surgery Prompt Accuracy vs. Original Prompt Accuracy (Paired t-test):")
+            perform_paired_statistical_test(ls_accs, orig_accs, "Latent Surgery vs Original Prompt Accuracy")
+        
+        # Example: Latent Surgery vs. Random Edit Prompt Accuracy (Paired)
+        if 'Latent_Surgery_Prompt_Accuracy' in results_df_multi_run.columns and \
+           'Random_Edit_Prompt_Accuracy' in results_df_multi_run.columns:
+            ls_accs = results_df_multi_run['Latent_Surgery_Prompt_Accuracy'].tolist()
+            re_accs = results_df_multi_run['Random_Edit_Prompt_Accuracy'].tolist()
+            print("\nComparing Latent Surgery Prompt Accuracy vs. Random Edit Prompt Accuracy (Paired t-test):")
+            perform_paired_statistical_test(ls_accs, re_accs, "Latent Surgery vs Random Edit Prompt Accuracy")
+
+        # Example: Latent Surgery vs. SpLiCE Prompt Accuracy (Paired)
+        if 'Latent_Surgery_Prompt_Accuracy' in results_df_multi_run.columns and \
+           'SpLiCE_Prompt_Accuracy' in results_df_multi_run.columns:
+            ls_accs = results_df_multi_run['Latent_Surgery_Prompt_Accuracy'].tolist()
+            splice_accs = results_df_multi_run['SpLiCE_Prompt_Accuracy'].tolist()
+            print("\nComparing Latent Surgery Prompt Accuracy vs. SpLiCE Prompt Accuracy (Paired t-test):")
+            perform_paired_statistical_test(ls_accs, splice_accs, "Latent Surgery vs SpLiCE Prompt Accuracy")
 
 
-    # Save summary of results
+        # Save the full multi-run results DataFrame
+        multi_run_csv_path = os.path.join(output_dir, 'multi_run_evaluation_results.csv')
+        results_df_multi_run.to_csv(multi_run_csv_path, index=False)
+        print(f"\nFull multi-run results saved to {multi_run_csv_path}")
+
+    # Save summary of results (if only one run, this is the same as all_results)
     final_results_df = pd.DataFrame(all_results)
     output_csv_path = os.path.join(output_dir, 'evaluation_results.csv')
     final_results_df.to_csv(output_csv_path, index=False)
