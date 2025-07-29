@@ -24,7 +24,7 @@ def prompt_tuning_baseline(clip_wrapper, embeddings, labels, concept_positive, c
     print(f"Running Prompt Tuning Baseline for '{concept_positive}' vs '{concept_negative}'...")
 
     # Create text prompts
-    positive_prompt = f"A photo of a {concept_positive.lower()}"
+    positive_prompt = f"A photo of a {concept_positive['positive'].lower()}"
     negative_prompt = f"A photo of a {concept_negative.lower()}"
 
     # Embed the prompts
