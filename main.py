@@ -47,11 +47,11 @@ def get_dataset_dataloaders(cfg, preprocess_fn):
     dataset_name = cfg['dataset'].lower()
     if dataset_name == 'celeba':
         # get_celeba_dataloaders should be updated to return train_dataset, test_dataset
-        train_loader, test_loader, train_dataset, test_dataset = get_celeba_dataloaders(cfg, preprocess_fn)
+        train_loader, test_loader = get_celeba_dataloaders(cfg, preprocess_fn)
         return train_loader, test_loader, train_dataset, test_dataset
     elif dataset_name == 'cub-200': 
         # get_cub_dataloaders should be updated to return train_dataset, test_dataset
-        train_loader, test_loader, train_dataset, test_dataset = get_cub_dataloaders(cfg, preprocess_fn)
+        train_loader, test_loader = get_cub_dataloaders(cfg, preprocess_fn)
         return train_loader, test_loader, train_dataset, test_dataset
     # elif dataset_name == 'imagenet': 
     #     # If imagenet is implemented, it should also return the datasets
