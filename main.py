@@ -10,7 +10,7 @@ from datetime import datetime
 from models.clip_wrapper import CLIPModelWrapper
 from data.celeba_loader import get_celeba_dataloaders # Ensure this is correct
 from surgery.direction_finder import compute_direction
-from surgery.edit_embedding import apply_latent_surgery
+from surgery.edit_embedding import apply_surgery
 from evaluation.metrics import (
     evaluate_probe_accuracy, evaluate_retrieval,
     compute_cosine_similarity_change,
