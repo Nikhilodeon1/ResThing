@@ -4,6 +4,7 @@ import os
 import json
 import pickle
 import torch
+import numpy as np # NEW: Import numpy for .npy file handling
 
 def save_json(data: dict, file_path: str):
     """Saves a dictionary to a JSON file."""
@@ -44,3 +45,19 @@ def load_torch_tensor(file_path: str) -> torch.Tensor:
     tensor = torch.load(file_path)
     print(f"Tensor loaded from {file_path}")
     return tensor
+
+# NEW: Functions for NumPy array saving/loading (.npy)
+def save_numpy(array: np.ndarray, file_path: str):
+    """Saves a NumPy array to a .npy file."""
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    np.save(file_path, array)
+    print(f"NumPy array saved to {file_path}.npy")
+
+def load_numpy(file_path: str) -> np.ndarray:
+    """Loads a NumPy array from a .npy file."""
+    # Ensure .npy extension is present if not provided
+    if not file_path.endswith('.npy'):
+        file_path += '.npy'
+    array = np.load(file_path)
+    print(f"NumPy array loaded from {file_path}")
+    return array

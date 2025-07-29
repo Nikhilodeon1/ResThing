@@ -1,5 +1,4 @@
 # evaluation/visualize.py
-# Assuming this file exists and contains create_tsne_plot, plot_cosine_similarity_hist, plot_vector_trajectories
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -10,6 +9,8 @@ import torch
 from PIL import Image
 import shutil # For copying images
 from datetime import datetime # Added for report timestamp
+# NEW: Import io_utils for image loading if needed, though PIL Image.open is direct
+# from utils.io_utils import load_torch_tensor # Not directly needed for images here
 
 
 def create_tsne_plot(embeddings, labels, title, save_path):
@@ -257,3 +258,183 @@ def visualize_failure_modes(encoder, original_embeddings, edited_embeddings, ori
             f.write("---\n\n") # Separator
     
     print(f"Failure modes report saved to {markdown_report_path}")
+
+# NEW: Function to visualize retrieval examples
+def visualize_retrieval_examples(
+    query_img_ids: list,
+    query_original_embeddings: torch.Tensor,
+    query_edited_embeddings: torch.Tensor,
+    gallery_img_ids: list,
+    gallery_embeddings: torch.Tensor,
+    original_nn_indices: torch.Tensor, # Indices into gallery_img_ids/embeddings
+    edited_nn_indices: torch.Tensor,   # Indices into gallery_img_ids/embeddings
+    cfg: dict,
+    num_queries_to_visualize: int = 5,
+    num_nn_to_show: int = 5,
+    output_dir: str = None
+):
+    """
+    Visualizes retrieval examples (query image + its nearest neighbors)
+    before and after latent surgery.
+    
+    Args:
+        query_img_ids (list): Image IDs of the query images.
+        query_original_embeddings (torch.Tensor): Original embeddings of query images.
+        query_edited_embeddings (torch.Tensor): Edited embeddings of query images.
+        gallery_img_ids (list): Image IDs of all gallery images.
+        gallery_embeddings (torch.Tensor): Embeddings of all gallery images.
+        original_nn_indices (torch.Tensor): Indices of k-NN in gallery for original queries.
+                                             Shape: (num_queries, num_nn_to_show)
+        edited_nn_indices (torch.Tensor): Indices of k-NN in gallery for edited queries.
+                                           Shape: (num_queries, num_nn_to_show)
+        cfg (dict): Configuration dictionary, used to get data_root.
+        num_queries_to_visualize (int): Number of query examples to visualize.
+        num_nn_to_show (int): Number of nearest neighbors to display for each query.
+        output_dir (str, optional): Directory to save the visualization grids.
+    """
+    print("\n--- Visualizing Retrieval Examples ---")
+    if output_dir is None:
+        output_dir = os.path.join(cfg['output_dir'], 'retrieval_examples')
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Ensure tensors are on CPU for numpy operations
+    gallery_embeddings_np = gallery_embeddings.cpu().numpy()
+
+    # Select random queries to visualize
+    num_queries_to_visualize = min(num_queries_to_visualize, len(query_img_ids))
+    selected_query_indices = np.random.choice(len(query_img_ids), num_queries_to_visualize, replace=False)
+
+    dataset_name = cfg['dataset'].lower()
+    data_root = cfg['data_root']
+
+    for i, query_idx in enumerate(selected_query_indices):
+        query_id = query_img_ids[query_idx]
+        
+        # Get paths for query image
+        query_image_path = _get_image_full_path(query_id, dataset_name, data_root)
+        if not query_image_path or not os.path.exists(query_image_path):
+            print(f"Warning: Query image not found for ID {query_id}. Skipping visualization.")
+            continue
+
+        fig, axes = plt.subplots(2, num_nn_to_show + 1, figsize=(2 * (num_nn_to_show + 1), 4.5)) # +1 for query image
+
+        # Load query image
+        try:
+            query_img = Image.open(query_image_path).convert("RGB")
+        except Exception as e:
+            print(f"Error loading query image {query_image_path}: {e}. Skipping.")
+            plt.close(fig)
+            continue
+
+        # Plot query image
+        axes[0, 0].imshow(query_img)
+        axes[0, 0].set_title(f'Query: {query_id}\n(Original)', fontsize=8)
+        axes[0, 0].axis('off')
+        axes[1, 0].imshow(query_img)
+        axes[1, 0].set_title(f'Query: {query_id}\n(Edited)', fontsize=8)
+        axes[1, 0].axis('off')
+
+        # Plot original nearest neighbors
+        original_nn_ids = [gallery_img_ids[idx] for idx in original_nn_indices[query_idx, :num_nn_to_show].tolist()]
+        for j, nn_id in enumerate(original_nn_ids):
+            nn_path = _get_image_full_path(nn_id, dataset_name, data_root)
+            if nn_path and os.path.exists(nn_path):
+                try:
+                    nn_img = Image.open(nn_path).convert("RGB")
+                    axes[0, j + 1].imshow(nn_img)
+                    axes[0, j + 1].set_title(f'NN {j+1}: {nn_id}', fontsize=8)
+                except Exception as e:
+                    print(f"Error loading original NN image {nn_path}: {e}")
+            axes[0, j + 1].axis('off')
+
+        # Plot edited nearest neighbors
+        edited_nn_ids = [gallery_img_ids[idx] for idx in edited_nn_indices[query_idx, :num_nn_to_show].tolist()]
+        for j, nn_id in enumerate(edited_nn_ids):
+            nn_path = _get_image_full_path(nn_id, dataset_name, data_root)
+            if nn_path and os.path.exists(nn_path):
+                try:
+                    nn_img = Image.open(nn_path).convert("RGB")
+                    axes[1, j + 1].imshow(nn_img)
+                    axes[1, j + 1].set_title(f'NN {j+1}: {nn_id}', fontsize=8)
+                except Exception as e:
+                    print(f"Error loading edited NN image {nn_path}: {e}")
+            axes[1, j + 1].axis('off')
+        
+        plt.tight_layout()
+        plot_path = os.path.join(output_dir, f"retrieval_grid_{query_id.replace(os.path.sep, '_')}.png")
+        plt.savefig(plot_path)
+        plt.close(fig)
+        print(f"Saved retrieval grid for query {query_id} to {plot_path}")
+
+
+# Helper function to get full image path
+def _get_image_full_path(image_id, dataset_name, data_root):
+    if dataset_name == 'celeba':
+        return os.path.join(data_root, 'img_align_celeba', image_id)
+    elif dataset_name == 'cub-200':
+        return os.path.join(data_root, 'CUB_200_2011', 'images', image_id)
+    else:
+        print(f"Warning: Unknown dataset '{dataset_name}'. Cannot determine image path for ID: {image_id}.")
+        return None
+
+# NEW: Function to plot heatmap of cosine similarity between direction vectors
+def plot_direction_heatmap(
+    direction_vectors: dict, # e.g., {'concept_A': tensor_A, 'concept_B': tensor_B}
+    save_path: str = None
+):
+    """
+    Generates a heatmap of pairwise cosine similarities between multiple direction vectors.
+
+    Args:
+        direction_vectors (dict): A dictionary where keys are concept names (str)
+                                  and values are their corresponding direction vectors (torch.Tensor).
+        save_path (str, optional): Directory and filename to save the heatmap.
+                                   If None, plots are shown.
+    """
+    print("\n--- Generating Direction Vector Cosine Similarity Heatmap ---")
+    if not direction_vectors:
+        print("No direction vectors provided for heatmap. Skipping.")
+        return
+
+    concept_names = list(direction_vectors.keys())
+    vectors = [vec.cpu().numpy() for vec in direction_vectors.values()]
+
+    if len(vectors) < 2:
+        print("At least two direction vectors are needed to create a similarity heatmap. Skipping.")
+        return
+
+    # Calculate pairwise cosine similarities
+    num_vectors = len(vectors)
+    similarity_matrix = np.eye(num_vectors) # Initialize with 1s on diagonal (self-similarity)
+
+    for i in range(num_vectors):
+        for j in range(i + 1, num_vectors):
+            vec1 = vectors[i]
+            vec2 = vectors[j]
+            # Ensure vectors are normalized
+            vec1_norm = vec1 / np.linalg.norm(vec1)
+            vec2_norm = vec2 / np.linalg.norm(vec2)
+            similarity = np.dot(vec1_norm, vec2_norm)
+            similarity_matrix[i, j] = similarity
+            similarity_matrix[j, i] = similarity # Matrix is symmetric
+
+    plt.figure(figsize=(8, 7))
+    sns.heatmap(
+        similarity_matrix,
+        annot=True,
+        cmap='coolwarm',
+        fmt=".2f",
+        linewidths=.5,
+        xticklabels=concept_names,
+        yticklabels=concept_names
+    )
+    plt.title('Cosine Similarity between Concept Direction Vectors')
+    plt.tight_layout()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path)
+        plt.close()
+        print(f"Direction vector heatmap saved to {save_path}")
+    else:
+        plt.show()

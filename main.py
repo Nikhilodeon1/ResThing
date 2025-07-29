@@ -32,6 +32,8 @@ from evaluation.visualize import (
     plot_cosine_similarity_hist,
     plot_vector_trajectories,
     visualize_failure_modes, # NEW: Failure mode visualization
+    visualize_retrieval_examples, # NEW: Retrieval visualization
+    plot_direction_heatmap, # NEW: Direction vector heatmap
 )
 # Import baselines
 from baselines.prompt_tuning import prompt_tuning_baseline
@@ -251,7 +253,7 @@ def main():
             print("\n--- Running Retrieval Evaluation ---")
             # For Original Embeddings
             print("Evaluating retrieval for Original Embeddings:")
-            retrieval_orig_mAP, retrieval_orig_topK_acc = evaluate_retrieval(
+            retrieval_orig_mAP, retrieval_orig_topK_acc, original_nn_indices = evaluate_retrieval(
                 test_embeddings_orig_for_ls, test_labels_for_ls, test_img_ids_for_ls, 
                 test_embeddings_orig_for_ls, test_labels_for_ls, test_img_ids_for_ls, # Use test set as gallery
                 cfg['retrieval_top_k'],
@@ -262,7 +264,7 @@ def main():
 
             # For Edited Embeddings
             print("Evaluating retrieval for Edited Embeddings:")
-            retrieval_edited_mAP, retrieval_edited_topK_acc = evaluate_retrieval(
+            retrieval_edited_mAP, retrieval_edited_topK_acc, edited_nn_indices = evaluate_retrieval(
                 test_embeddings_edited_ls, test_labels_for_ls, test_img_ids_for_ls,
                 test_embeddings_edited_ls, test_labels_for_ls, test_img_ids_for_ls, # Use edited set as gallery
                 cfg['retrieval_top_k'],
@@ -292,12 +294,21 @@ def main():
                 os.path.join(output_dir, f'geometric_analysis_direction_distribution_run{run_idx}.png')
             )
 
-            # Placeholder for future multiple concept direction comparison:
-            # If you have multiple concept directions (e.g., from different runs/definitions),
-            # you can collect them and use plot_pairwise_similarity_heatmap.
-            # E.g., concept_directions = [direction_concept1, direction_concept2]
-            # similarity_matrix = ... # compute pairwise similarities
-            # analysis.geometry.plot_pairwise_similarity_heatmap(similarity_matrix, ['Concept1', 'Concept2'], "Concept Direction Similarities", ...)
+            # NEW: Plot heatmap of cosine similarity between direction vectors
+            if cfg.get('plot_direction_heatmap', True):
+                print("Generating heatmap for direction vector similarities...")
+                direction_vectors_for_heatmap = {
+                    "Concept_Direction": direction,
+                    "Random_Direction": random_direction
+                }
+                # Add linear probe direction if available and enabled
+                # if cfg.get('run_linear_probe_baseline', True) and 'lp_probe_direction' in locals():
+                #     direction_vectors_for_heatmap['Linear_Probe_Direction'] = lp_probe_direction
+                
+                plot_direction_heatmap(
+                    direction_vectors_for_heatmap,
+                    os.path.join(output_dir, f'direction_similarity_heatmap_run{run_idx}.png')
+                )
             
             print("Geometric Analysis complete.")
 
@@ -318,6 +329,27 @@ def main():
                 num_samples_to_save=cfg.get('num_failure_viz_samples', 10)
             )
             print("Failure Mode Visualizations complete.")
+
+        # NEW: Retrieval Visualization
+        if cfg.get('enable_retrieval_viz', False):
+            if cfg.get('run_retrieval_eval', True) and 'original_nn_indices' in locals() and 'edited_nn_indices' in locals():
+                print("\n--- Preparing Retrieval Visualizations ---")
+                visualize_retrieval_examples(
+                    query_img_ids=test_img_ids_for_ls,
+                    query_original_embeddings=test_embeddings_orig_for_ls,
+                    query_edited_embeddings=test_embeddings_edited_ls,
+                    gallery_img_ids=test_img_ids_for_ls, # Using test set as gallery
+                    gallery_embeddings=test_embeddings_orig_for_ls, # Using original test embeddings as gallery
+                    original_nn_indices=original_nn_indices,
+                    edited_nn_indices=edited_nn_indices,
+                    cfg=cfg,
+                    num_queries_to_visualize=cfg.get('num_retrieval_viz_queries', 5),
+                    num_nn_to_show=cfg.get('num_retrieval_viz_nn', 5),
+                    output_dir=os.path.join(output_dir, 'retrieval_examples') # Subdirectory for retrieval viz
+                )
+                print("Retrieval Visualizations complete.")
+            else:
+                print("Skipping Retrieval Visualizations: Retrieval evaluation was not run or indices not available.")
 
 
         # --- Visualizations ---
