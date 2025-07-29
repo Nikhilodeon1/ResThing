@@ -131,7 +131,7 @@ def main():
         
         # Apply latent surgery to test embeddings
         print(f"Applying latent surgery with alpha={cfg['surgery_alpha']}...")
-        test_embeddings_edited_ls, _, _, _ = apply_surgery(
+        test_embeddings_edited_ls, _, _, _ = edit_embedding.apply_surgery(
             encoder, test_loader, direction, cfg['surgery_alpha']
         )
         
