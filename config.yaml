@@ -1,26 +1,37 @@
 # config.yaml
 
 dataset: CelebA
-concept:
-  positive: Smiling
-  negative: Not_Smiling
+concept: {'positive': 'Smiling', 'negative': 'Not_Smiling'}
 batch_size: 32
-model_name: openai/clip-vit-base-patch32
+model_name: openai/clip-vit-base-patch32 # Default encoder
 surgery_alpha: 1.0
 output_dir: ./outputs
 save_tsne: True
-
-# --- Baselines ---
 run_prompt_baseline: True
 run_random_edit_baseline: True
-run_linear_probe_baseline: True # Set to True to run the linear_probe.py baseline
+run_linear_probe_baseline: True
+run_latent_probe: True
+run_retrieval_eval: True
+retrieval_top_k: 5
+celeba_root_dir: ../data/celeba
+cub_root_dir: ../data/cub
+imagenet_root_dir: ../data/imagenet
 
-# --- Optional Evaluation Modules ---
-run_latent_probe: True         # Set to True to run the latent_probe.py evaluation
-run_retrieval_eval: True       # Set to True to run the retrieval.py evaluation
-retrieval_top_k: 5             # Parameter for retrieval_eval: Number of top items to consider
+# --- NEW FEATURES CONFIGURATION ---
 
-# --- Dataset Root Directories ---
-celeba_root_dir: "../data/celeba"
-cub_root_dir: "../data/cub"
-imagenet_root_dir: "../data/imagenet"
+# Option for SpLiCE Baseline
+run_splice_baseline: False # Set to True to enable SpLiCE comparison
+
+# Option for geometric/theoretical analysis
+enable_geometric_analysis: False # Set to True to compute direction orthogonality, angle distributions etc.
+
+# Option to experiment with another encoder (e.g., DINOv2 or CLIP-B/16)
+# Specify model_name here (e.g., 'facebook/dinov2-base' or 'openai/clip-vit-base-patch16')
+# Make sure the chosen model is compatible with your environment.
+alternative_encoder_name: "" # Leave empty to use default model_name, or specify another HuggingFace model ID
+
+# Option for failure mode visualizations
+enable_failure_mode_viz: False # Set to True to generate visualizations of edit failures
+
+# Option for statistical significance tests
+num_runs_for_stats: 1 # Set to >1 to run multiple experiments and compute stats
