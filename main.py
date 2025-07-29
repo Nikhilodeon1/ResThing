@@ -46,7 +46,9 @@ def main():
     print(f"\nUsing device: {device}")
 
     # Create output directory
+    # Create output directory
     output_dir = cfg['output_dir']
+    print(f"DEBUG: Loaded output_dir from config: '{output_dir}'") # <--- ADD THIS LINE
     os.makedirs(output_dir, exist_ok=True)
 
     # Prepare results storage
