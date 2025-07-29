@@ -111,7 +111,7 @@ def main():
         
         # Data loaders (dynamically load based on config)
         # Ensure get_dataset_dataloaders returns train_dataset and test_dataset
-        train_loader, test_loader, train_dataset, test_dataset = get_dataset_dataloaders(cfg, encoder.preprocess_image) 
+        train_loader, test_loader = get_dataset_dataloaders(cfg, encoder.preprocess_image) 
         
         # Get embeddings and labels for the test set
         print("\nGetting test set embeddings...")
