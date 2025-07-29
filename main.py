@@ -24,8 +24,8 @@ from evaluation.visualize import (
     # Potentially new failure mode visualization functions will go here
 )
 # Import baselines
-from baselines.prompt_tuning import run_prompt_tuning_baseline
-from baselines.random_edit import run_random_edit_baseline
+from baselines.prompt_tuning import prompt_tuning_baseline
+from baselines.random_edit import random_edit_baseline
 from baselines.linear_probe import run_linear_probe_baseline
 # Placeholder import for SpLiCE baseline
 from baselines.splice_baseline import run_splice_baseline # Now functional after previous update
